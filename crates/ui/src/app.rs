@@ -204,6 +204,99 @@ impl AppRoot {
         cx.notify();
     }
 
+    fn do_import(&mut self, source: &'static str, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: None,
+        });
+
+        let db_path: PathBuf = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("investimentos-v2")
+            .join("data.db");
+
+        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+            let paths_result = rx.await;
+            let paths = match paths_result {
+                Ok(Ok(Some(paths))) => paths,
+                _ => return, // cancelled or error
+            };
+
+            let db = match Database::open(&db_path) {
+                Ok(db) => db,
+                Err(e) => {
+                    let _ = this.update(cx, |this, cx: &mut Context<Self>| {
+                        this.status_message = Some(format!("DB error: {e}"));
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+
+            let mut total_msg = Vec::new();
+
+            for path in &paths {
+                let msg = match source {
+                    "b3" => {
+                        match investimentos_core::parsers::b3::parse_b3_xlsx(path) {
+                            Ok(result) => {
+                                let mut tx_new = 0u32;
+                                let mut inc_new = 0u32;
+                                for tx in &result.transactions {
+                                    if let Ok(true) = investimentos_core::db::queries::insert_transaction(&db, tx) {
+                                        tx_new += 1;
+                                    }
+                                }
+                                for inc in &result.income {
+                                    if let Ok(true) = investimentos_core::db::queries::insert_income(&db, inc) {
+                                        inc_new += 1;
+                                    }
+                                }
+                                format!("{}: {} tx ({} new), {} income ({} new)",
+                                    path.file_name().unwrap_or_default().to_string_lossy(),
+                                    result.transactions.len(), tx_new,
+                                    result.income.len(), inc_new)
+                            }
+                            Err(e) => format!("{}: error: {e}", path.file_name().unwrap_or_default().to_string_lossy()),
+                        }
+                    }
+                    "binance" => {
+                        match investimentos_core::parsers::binance::parse_binance_csv(path) {
+                            Ok(result) => {
+                                let mut tx_new = 0u32;
+                                for tx in &result.transactions {
+                                    if let Ok(true) = investimentos_core::db::queries::insert_transaction(&db, tx) {
+                                        tx_new += 1;
+                                    }
+                                }
+                                format!("{}: {} tx ({} new), net BTC: {:.8}",
+                                    path.file_name().unwrap_or_default().to_string_lossy(),
+                                    result.transactions.len(), tx_new, result.net_btc)
+                            }
+                            Err(e) => format!("{}: error: {e}", path.file_name().unwrap_or_default().to_string_lossy()),
+                        }
+                    }
+                    "ibkr-csv" => {
+                        match import_ibkr_csv(&db, path) {
+                            Ok(msg) => msg,
+                            Err(e) => format!("{}: error: {e}", path.file_name().unwrap_or_default().to_string_lossy()),
+                        }
+                    }
+                    _ => "Unknown source".to_string(),
+                };
+                total_msg.push(msg);
+            }
+
+            let _ = this.update(cx, |this, cx: &mut Context<Self>| {
+                this.status_message = Some(total_msg.join(". "));
+                this.mode = AppMode::Tab(this.last_tab);
+                cx.notify();
+            });
+        }).detach();
+    }
+
     fn do_sync(&mut self, cx: &mut Context<Self>) {
         if self.syncing {
             return;
@@ -272,12 +365,18 @@ impl AppRoot {
                                         }
                                     }
 
+                                    // Store daily prices from open positions
+                                    for price in &result.daily_prices {
+                                        let _ = investimentos_core::db::queries::upsert_daily_price(&db, price);
+                                    }
+
                                     parts.push(format!(
-                                        "IBKR: {} trades ({} new), {} income ({} new)",
+                                        "IBKR: {} trades ({} new), {} income ({} new), {} positions",
                                         result.transactions.len(),
                                         tx_new,
                                         result.income.len(),
                                         inc_new,
+                                        result.positions_imported,
                                     ));
                                 }
                                 Err(e) => parts.push(format!("IBKR parse: {e}")),
@@ -504,10 +603,7 @@ impl AppRoot {
             AppMode::Tab(Tab::Positions) => views::positions::render_positions(&self.db),
             AppMode::Tab(Tab::Income) => views::income::render_income(&self.db),
             AppMode::Tab(Tab::History) => views::history::render_history(&self.db),
-            AppMode::Import => self.render_mode_with_back(
-                views::import::render_import(self.last_tab.label()),
-                cx,
-            ),
+            AppMode::Import => self.render_import_mode(cx),
             AppMode::ManualGold => self.render_mode_with_back(
                 views::manual::render_manual_gold(),
                 cx,
@@ -551,6 +647,62 @@ impl AppRoot {
                     }))
                     .child(format!("Back to {}", last_tab_label)),
             )
+    }
+
+    // ----- Import mode -----
+    fn render_import_mode(&self, cx: &mut Context<Self>) -> AnyElement {
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_6()
+            .p_6()
+            .w_full()
+            .flex_1()
+            .child(
+                div()
+                    .text_2xl()
+                    .font_weight(FontWeight::BOLD)
+                    .child("Import Transactions"),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme::TEXT_SECONDARY)
+                    .child("Select a file format to import. A file picker will open."),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap_4()
+                    .child(
+                        action_button("do-import-b3", "Import B3 (.xlsx)", theme::GREEN)
+                            .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                                this.do_import("b3", cx);
+                            })),
+                    )
+                    .child(
+                        action_button("do-import-binance", "Import Binance (.csv)", theme::YELLOW)
+                            .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                                this.do_import("binance", cx);
+                            })),
+                    )
+                    .child(
+                        action_button("do-import-ibkr", "Import IBKR CSV", theme::ACCENT)
+                            .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                                this.do_import("ibkr-csv", cx);
+                            })),
+                    ),
+            );
+
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .flex_1()
+            .child(content)
+            .child(self.render_back_bar(cx))
+            .into_any_element()
     }
 
     // ----- Settings mode -----
@@ -761,4 +913,130 @@ fn action_button(
         .cursor_pointer()
         .hover(move |style| style.opacity(0.85))
         .child(label)
+}
+
+/// Parse IBKR CSV activity statement and insert trades + dividends into DB.
+fn import_ibkr_csv(
+    db: &Database,
+    path: &std::path::Path,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(path)?;
+    let filename = path.file_name().unwrap_or_default().to_string_lossy();
+
+    let mut tx_new = 0u32;
+    let mut tx_dup = 0u32;
+    let mut inc_new = 0u32;
+    let mut inc_dup = 0u32;
+
+    // Parse Trades section
+    for line in content.lines() {
+        if !line.starts_with("Trades,Data,Order,") {
+            continue;
+        }
+        let fields: Vec<&str> = line.split(',').collect();
+        if fields.len() < 15 {
+            continue;
+        }
+
+        let currency = fields[4].trim();
+        let symbol = fields[5].trim();
+        let datetime = fields[6].trim().trim_matches('"');
+        let quantity: f64 = fields[7].trim().parse().unwrap_or(0.0);
+        let trade_price: f64 = fields[8].trim().parse().unwrap_or(0.0);
+        let proceeds: f64 = fields[10].trim().parse().unwrap_or(0.0);
+        let commission: f64 = fields[11].trim().parse().unwrap_or(0.0);
+
+        if quantity == 0.0 || symbol.is_empty() {
+            continue;
+        }
+
+        let date_str = datetime.split(',').next().unwrap_or("").trim();
+        let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let tx = investimentos_core::parsers::ibkr_flex::trade_to_transaction(
+            symbol, currency, date, quantity, trade_price, proceeds, commission, 1.0,
+        );
+        match investimentos_core::db::queries::insert_transaction(db, &tx) {
+            Ok(true) => tx_new += 1,
+            Ok(false) => tx_dup += 1,
+            Err(_) => {}
+        }
+    }
+
+    // Parse Dividends section
+    for line in content.lines() {
+        if !line.starts_with("Dividends,Data,") || line.starts_with("Dividends,Data,Total") {
+            continue;
+        }
+        let fields: Vec<&str> = line.split(',').collect();
+        if fields.len() < 6 {
+            continue;
+        }
+
+        let currency = fields[2].trim();
+        let date_str = fields[3].trim();
+        let description = fields[4].trim();
+        let amount: f64 = fields[5].trim().parse().unwrap_or(0.0);
+
+        let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let (symbol, _) =
+            investimentos_core::parsers::ibkr_flex::parse_dividend_description(description);
+        if symbol.is_empty() {
+            continue;
+        }
+
+        // Find matching withholding tax
+        let mut tax_amount = 0.0f64;
+        let mut tax_origin = String::new();
+        for tax_line in content.lines() {
+            if !tax_line.starts_with("Withholding Tax,Data,")
+                || tax_line.starts_with("Withholding Tax,Data,Total")
+            {
+                continue;
+            }
+            let tf: Vec<&str> = tax_line.split(',').collect();
+            if tf.len() < 6 {
+                continue;
+            }
+            if tf[3].trim() == date_str && tf[4].trim().starts_with(&format!("{}(", symbol)) {
+                tax_amount += tf[5].trim().parse::<f64>().unwrap_or(0.0);
+                let (_, origin) =
+                    investimentos_core::parsers::ibkr_flex::parse_tax_description(tf[4].trim());
+                if !origin.is_empty() {
+                    tax_origin = origin;
+                }
+            }
+        }
+
+        let inc = investimentos_core::parsers::ibkr_flex::dividend_to_income(
+            &symbol,
+            currency,
+            date,
+            amount,
+            tax_amount,
+            &tax_origin,
+            1.0,
+        );
+        match investimentos_core::db::queries::insert_income(db, &inc) {
+            Ok(true) => inc_new += 1,
+            Ok(false) => inc_dup += 1,
+            Err(_) => {}
+        }
+    }
+
+    Ok(format!(
+        "{}: {} trades ({} new), {} income ({} new)",
+        filename,
+        tx_new + tx_dup,
+        tx_new,
+        inc_new + inc_dup,
+        inc_new,
+    ))
 }

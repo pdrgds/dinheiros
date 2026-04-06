@@ -6,10 +6,14 @@ use sha2::{Digest, Sha256};
 
 use crate::{AssetType, Income, IncomeType, Source, Transaction, TxType};
 
+use crate::types::DailyPrice;
+
 /// Result of parsing an IBKR Flex XML statement.
 pub struct IbkrImportResult {
     pub transactions: Vec<Transaction>,
     pub income: Vec<Income>,
+    pub daily_prices: Vec<DailyPrice>,
+    pub positions_imported: usize,
 }
 
 /// Parse an IBKR Activity Flex XML string into transactions and income records.
@@ -108,6 +112,74 @@ pub fn parse_flex_xml(xml: &str) -> Result<IbkrImportResult, Box<dyn std::error:
         income.push(inc);
     }
 
+    let mut daily_prices = Vec::new();
+
+    // --- OpenPositions → synthetic Buy transactions (for current holdings) ---
+    // Only use SUMMARY-level positions to avoid double-counting LOT details.
+    let mut positions_imported = 0;
+    for pos in &statement.positions.items {
+        let level = pos
+            .level_of_detail
+            .as_ref()
+            .map(|l| format!("{:?}", l))
+            .unwrap_or_default();
+        if level != "Summary" {
+            continue;
+        }
+
+        let quantity = pos.quantity.to_f64().unwrap_or(0.0);
+        if quantity.abs() < 0.00001 {
+            continue;
+        }
+
+        let cost_basis = pos
+            .cost_basis_money
+            .and_then(|c| c.to_f64())
+            .unwrap_or(0.0);
+        let cost_price = pos
+            .cost_basis_price
+            .and_then(|c| c.to_f64())
+            .unwrap_or(0.0);
+        let mark_price = pos.mark_price.to_f64().unwrap_or(0.0);
+
+        let hash_input = format!(
+            "ibkr:openpos:{}:{}:{}:{}",
+            pos.symbol, pos.report_date, quantity, cost_price
+        );
+        let import_hash = sha256_hex(&hash_input);
+
+        // Synthetic buy at cost basis
+        transactions.push(Transaction {
+            id: None,
+            source: Source::Ibkr,
+            asset_type: classify_ibkr_asset(&pos.symbol, &pos.currency),
+            symbol: pos.symbol.clone(),
+            tx_type: TxType::Buy,
+            date: pos.report_date,
+            quantity: quantity.abs(),
+            unit_price: Some(cost_price),
+            currency: pos.currency.clone(),
+            total_value: cost_basis.abs(),
+            brl_rate: 1.0, // placeholder
+            total_brl: cost_basis.abs(),
+            commission: None,
+            fee_brl: None,
+            notes: Some("from_open_positions".to_string()),
+            import_hash,
+        });
+
+        // Store mark price as a daily price point
+        daily_prices.push(DailyPrice {
+            symbol: pos.symbol.clone(),
+            date: pos.report_date,
+            close_price: mark_price,
+            currency: pos.currency.clone(),
+            brl_rate: 1.0, // placeholder
+        });
+
+        positions_imported += 1;
+    }
+
     // Sort for deterministic output
     transactions.sort_by_key(|t| (t.date, t.symbol.clone()));
     income.sort_by_key(|i| (i.date, i.symbol.clone()));
@@ -115,6 +187,8 @@ pub fn parse_flex_xml(xml: &str) -> Result<IbkrImportResult, Box<dyn std::error:
     Ok(IbkrImportResult {
         transactions,
         income,
+        daily_prices,
+        positions_imported,
     })
 }
 
