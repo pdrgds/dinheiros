@@ -1,3 +1,28 @@
+mod app;
+#[allow(dead_code)]
+mod theme;
+
+use gpui::{
+    prelude::*, px, size, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions,
+};
+
 fn main() {
-    println!("investimentos-ui — placeholder");
+    Application::new().run(|cx: &mut gpui::App| {
+        let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
+
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Investimentos v2".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            |_window, cx| cx.new(|_cx| app::AppRoot::new()),
+        )
+        .unwrap();
+
+        cx.activate(true);
+    });
 }

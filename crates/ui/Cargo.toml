@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 investimentos-core = { path = "../core" }
-# gpui-ce = { package = "gpui-ce", version = "0.3" }
-# TODO: re-enable once UI crate is implemented in Task 11
+gpui = { package = "gpui-ce", version = "0.3" }
+dirs = "5"
