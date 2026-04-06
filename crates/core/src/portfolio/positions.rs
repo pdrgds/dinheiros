@@ -60,8 +60,8 @@ pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
 
     for (symbol, acc) in &accum {
         // Skip fully closed positions
-        if acc.net_qty.abs() < 0.00001 {
-            continue;
+        if acc.net_qty < 0.00001 {
+            continue; // closed position or sells-only (no matching buys)
         }
 
         let avg_cost = acc.total_cost_orig / acc.net_qty;
