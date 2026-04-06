@@ -1,7 +1,9 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Source {
     B3,
     Ibkr,
@@ -18,19 +20,28 @@ impl Source {
             Source::Manual => "manual",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl fmt::Display for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Source {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "b3" => Some(Source::B3),
-            "ibkr" => Some(Source::Ibkr),
-            "binance" => Some(Source::Binance),
-            "manual" => Some(Source::Manual),
-            _ => None,
+            "b3" => Ok(Source::B3),
+            "ibkr" => Ok(Source::Ibkr),
+            "binance" => Ok(Source::Binance),
+            "manual" => Ok(Source::Manual),
+            _ => Err(format!("unknown source: {}", s)),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AssetType {
     StockBr,
     StockIntl,
@@ -49,20 +60,29 @@ impl AssetType {
             AssetType::Gold => "gold",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl fmt::Display for AssetType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for AssetType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "stock_br" => Some(AssetType::StockBr),
-            "stock_intl" => Some(AssetType::StockIntl),
-            "tesouro" => Some(AssetType::Tesouro),
-            "crypto" => Some(AssetType::Crypto),
-            "gold" => Some(AssetType::Gold),
-            _ => None,
+            "stock_br" => Ok(AssetType::StockBr),
+            "stock_intl" => Ok(AssetType::StockIntl),
+            "tesouro" => Ok(AssetType::Tesouro),
+            "crypto" => Ok(AssetType::Crypto),
+            "gold" => Ok(AssetType::Gold),
+            _ => Err(format!("unknown asset type: {}", s)),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TxType {
     Buy,
     Sell,
@@ -85,22 +105,31 @@ impl TxType {
             TxType::Deposit => "deposit",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl fmt::Display for TxType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for TxType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "buy" => Some(TxType::Buy),
-            "sell" => Some(TxType::Sell),
-            "dividend" => Some(TxType::Dividend),
-            "jcp" => Some(TxType::Jcp),
-            "fraction_auction" => Some(TxType::FractionAuction),
-            "send" => Some(TxType::Send),
-            "deposit" => Some(TxType::Deposit),
-            _ => None,
+            "buy" => Ok(TxType::Buy),
+            "sell" => Ok(TxType::Sell),
+            "dividend" => Ok(TxType::Dividend),
+            "jcp" => Ok(TxType::Jcp),
+            "fraction_auction" => Ok(TxType::FractionAuction),
+            "send" => Ok(TxType::Send),
+            "deposit" => Ok(TxType::Deposit),
+            _ => Err(format!("unknown tx type: {}", s)),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum IncomeType {
     Dividend,
     Jcp,
@@ -113,12 +142,21 @@ impl IncomeType {
             IncomeType::Jcp => "jcp",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl fmt::Display for IncomeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for IncomeType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "dividend" => Some(IncomeType::Dividend),
-            "jcp" => Some(IncomeType::Jcp),
-            _ => None,
+            "dividend" => Ok(IncomeType::Dividend),
+            "jcp" => Ok(IncomeType::Jcp),
+            _ => Err(format!("unknown income type: {}", s)),
         }
     }
 }
