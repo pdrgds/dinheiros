@@ -40,6 +40,11 @@ pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::
         let preco_unitario = cell_f64(&row[6]);
         let valor_operacao = cell_f64(&row[7]);
 
+        // Skip CDB entries (automatic savings, not investments)
+        if produto.contains("CDB") {
+            continue;
+        }
+
         let date = parse_b3_date(&data_str)?;
         let symbol = extract_symbol(&produto);
         let asset_type = if produto.starts_with("Tesouro") {

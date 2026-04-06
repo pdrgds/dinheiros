@@ -10,6 +10,8 @@ use crate::types::DailyPrice;
 #[derive(Debug)]
 pub struct ReconcileResult {
     pub prices_backfilled: usize,
+    pub symbols_failed: usize,
+    pub symbols_up_to_date: usize,
     pub rate_limited: bool,
 }
 
@@ -24,6 +26,41 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
     for (symbol, asset_type, currency) in &symbols {
         if asset_type == "crypto" {
             has_crypto = true;
+            continue;
+        }
+
+        // Gold: GC=F is USD per troy ounce, convert to BRL per gram
+        if asset_type == "gold" {
+            match yahoo::fetch_current_price("GC=F").await {
+                Ok(usd_per_oz) => {
+                    let usd_per_gram = usd_per_oz / 31.1035;
+                    match bcb_ptax::fetch_rate("USD", today).await {
+                        Ok(ptax) => {
+                            let brl_per_gram = usd_per_gram * ptax;
+                            if let Err(e) = queries::upsert_daily_price(
+                                db,
+                                &DailyPrice {
+                                    symbol: symbol.clone(),
+                                    date: today,
+                                    close_price: brl_per_gram,
+                                    currency: "BRL".to_string(),
+                                    brl_rate: 1.0,
+                                },
+                            ) {
+                                eprintln!("[reconcile] warning: failed to store gold price: {}", e);
+                            } else {
+                                count += 1;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[reconcile] warning: failed to fetch PTAX for gold: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[reconcile] warning: failed to fetch gold price: {}", e);
+                }
+            }
             continue;
         }
 
@@ -131,168 +168,338 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
 }
 
 /// Phase 2: Backfill historical price gaps.
-/// For each symbol, finds last stored date, fetches forward.
-/// Stops gracefully on rate limits.
+/// Runs CoinGecko (crypto) and Yahoo (stocks) backfills in parallel.
 pub async fn backfill_prices(db: &Database) -> Result<ReconcileResult, Box<dyn std::error::Error>> {
     let symbols = queries::get_distinct_symbols(db)?;
+
+    let crypto_symbols: Vec<_> = symbols
+        .iter()
+        .filter(|(_, at, _)| at == "crypto")
+        .cloned()
+        .collect();
+
+    // For Tesouro, include ALL symbols ever held (not just active)
+    // because the history chart needs prices for past holdings too.
+    let tesouro_symbols: Vec<_> = {
+        let mut stmt = db.conn().prepare(
+            "SELECT DISTINCT symbol, asset_type, currency FROM transactions WHERE asset_type = 'tesouro'"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let stock_symbols: Vec<_> = symbols
+        .iter()
+        .filter(|(sym, at, _)| at != "crypto" && at != "gold" && !tesouro::is_tesouro(sym))
+        .cloned()
+        .collect();
+
+    // Run all three in parallel
+    let (crypto_result, stock_result, tesouro_result) = tokio::join!(
+        backfill_crypto(db, &crypto_symbols),
+        backfill_stocks(db, &stock_symbols),
+        backfill_tesouro(db, &tesouro_symbols),
+    );
+
+    let (crypto_bf, crypto_fail, crypto_upd, crypto_rl) = crypto_result;
+    let (stock_bf, stock_fail, stock_upd, stock_rl) = stock_result;
+    let (tesouro_bf, tesouro_fail, tesouro_upd, _) = tesouro_result;
+
+    Ok(ReconcileResult {
+        prices_backfilled: crypto_bf + stock_bf + tesouro_bf,
+        symbols_failed: crypto_fail + stock_fail + tesouro_fail,
+        symbols_up_to_date: crypto_upd + stock_upd + tesouro_upd,
+        rate_limited: crypto_rl || stock_rl,
+    })
+}
+
+/// Backfill crypto prices via CoinGecko.
+/// Returns (backfilled, failed, up_to_date, rate_limited).
+async fn backfill_crypto(
+    db: &Database,
+    symbols: &[(String, String, String)],
+) -> (usize, usize, usize, bool) {
     let today = Local::now().date_naive();
-    let mut prices_backfilled: usize = 0;
-    let mut rate_limited = false;
+    let mut prices_backfilled = 0;
+    let mut symbols_failed = 0;
+    let mut symbols_up_to_date = 0;
 
-    for (symbol, asset_type, currency) in &symbols {
-        if rate_limited {
-            break;
-        }
-
-        // Skip Tesouro Direto for backfill — radaropcoes has no historical API
-        if tesouro::is_tesouro(symbol) {
-            continue;
-        }
-
-        // Determine start date: day after last stored price, or earliest transaction date
-        let start = match queries::get_latest_price_date(db, symbol)? {
-            Some(last) => last + Duration::days(1),
-            None => {
-                let txs = queries::get_transactions_by_symbol(db, symbol)?;
-                match txs.first() {
-                    Some(tx) => tx.date,
-                    None => continue, // no transactions, skip
-                }
-            }
+    for (symbol, _asset_type, _currency) in symbols {
+        let (start, end) = match backfill_date_range(db, symbol, today) {
+            Ok(Some(range)) => range,
+            Ok(None) => { symbols_up_to_date += 1; continue; }
+            Err(_) => continue,
         };
 
-        if start >= today {
-            continue; // already up to date
-        }
+        // CoinGecko free tier limits range to ~365 days — chunk if needed
+        let mut chunk_start = start;
+        while chunk_start < end {
+            let chunk_end = (chunk_start + Duration::days(300)).min(end);
 
-        if asset_type == "crypto" {
-            // Use CoinGecko for crypto
-            match coingecko::fetch_btc_brl_history(start, today).await {
+            match coingecko::fetch_btc_brl_history(chunk_start, chunk_end).await {
                 Ok(prices) => {
                     for (date, price) in &prices {
-                        if let Err(e) = queries::upsert_daily_price(
-                            db,
-                            &DailyPrice {
-                                symbol: symbol.clone(),
-                                date: *date,
-                                close_price: *price,
-                                currency: "BRL".to_string(),
-                                brl_rate: 1.0,
-                            },
-                        ) {
-                            eprintln!(
-                                "[reconcile] warning: failed to store backfill price for {} on {}: {}",
-                                symbol, date, e
-                            );
-                        } else {
+                        if queries::upsert_daily_price(db, &DailyPrice {
+                            symbol: symbol.clone(), date: *date, close_price: *price,
+                            currency: "BRL".to_string(), brl_rate: 1.0,
+                        }).is_ok() {
                             prices_backfilled += 1;
                         }
                     }
                 }
                 Err(e) => {
                     if is_rate_limited(&e) {
-                        eprintln!("[reconcile] rate limited while backfilling {}, stopping", symbol);
-                        rate_limited = true;
-                        break;
+                        return (prices_backfilled, symbols_failed, symbols_up_to_date, true);
                     }
-                    eprintln!(
-                        "[reconcile] warning: failed to backfill crypto {}: {}",
-                        symbol, e
-                    );
+                    symbols_failed += 1;
+                    eprintln!("[reconcile] crypto backfill failed for {} ({} to {}): {}", symbol, chunk_start, chunk_end, e);
+                    break;
+                }
+            }
+
+            chunk_start = chunk_end + Duration::days(1);
+            // Brief pause between chunks to avoid rate limits
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+    (prices_backfilled, symbols_failed, symbols_up_to_date, false)
+}
+
+/// Backfill stock/ETF prices via Yahoo Finance + BCB PTAX.
+async fn backfill_stocks(
+    db: &Database,
+    symbols: &[(String, String, String)],
+) -> (usize, usize, usize, bool) {
+    let today = Local::now().date_naive();
+    let mut prices_backfilled = 0;
+    let mut symbols_failed = 0;
+    let mut symbols_up_to_date = 0;
+
+    for (symbol, asset_type, currency) in symbols {
+        let (start, end) = match backfill_date_range(db, symbol, today) {
+            Ok(Some(range)) => range,
+            Ok(None) => { symbols_up_to_date += 1; continue; }
+            Err(_) => continue,
+        };
+
+        let yahoo_sym = yahoo::to_yahoo_symbol_with_db(symbol, asset_type, db);
+        let history = match yahoo::fetch_history(&yahoo_sym, start, end).await {
+            Ok(h) => h,
+            Err(e) => {
+                if is_rate_limited(&e) {
+                    return (prices_backfilled, symbols_failed, symbols_up_to_date, true);
+                }
+                symbols_failed += 1;
+                eprintln!("[reconcile] stock backfill failed for {}: {}", symbol, e);
+                continue;
+            }
+        };
+
+        let rate_map: Option<HashMap<NaiveDate, f64>> = if currency != "BRL" {
+            match bcb_ptax::fetch_rates_range(currency, start, end).await {
+                Ok(rates) => Some(rates.into_iter().collect()),
+                Err(e) => {
+                    if is_rate_limited(&e) {
+                        return (prices_backfilled, symbols_failed, symbols_up_to_date, true);
+                    }
+                    eprintln!("[reconcile] PTAX failed for {} ({}): {}", currency, symbol, e);
+                    continue;
                 }
             }
         } else {
-            // Use Yahoo Finance for stocks/bonds/gold
-            let yahoo_sym = yahoo::to_yahoo_symbol_with_db(symbol, asset_type, db);
+            None
+        };
 
-            let history = match yahoo::fetch_history(&yahoo_sym, start, today).await {
-                Ok(h) => h,
-                Err(e) => {
-                    if is_rate_limited(&e) {
-                        eprintln!("[reconcile] rate limited while backfilling {}, stopping", symbol);
-                        rate_limited = true;
-                        break;
-                    }
-                    eprintln!(
-                        "[reconcile] warning: failed to backfill {}: {}",
-                        symbol, e
-                    );
-                    continue;
-                }
-            };
-
-            // For non-BRL symbols, fetch PTAX rates for the range
-            let rate_map: Option<HashMap<NaiveDate, f64>> = if currency != "BRL" {
-                match bcb_ptax::fetch_rates_range(currency, start, today).await {
-                    Ok(rates) => {
-                        let map: HashMap<NaiveDate, f64> = rates.into_iter().collect();
-                        Some(map)
-                    }
-                    Err(e) => {
-                        if is_rate_limited(&e) {
-                            eprintln!(
-                                "[reconcile] rate limited fetching PTAX for {}, stopping",
-                                symbol
-                            );
-                            rate_limited = true;
-                            break;
-                        }
-                        eprintln!(
-                            "[reconcile] warning: failed to fetch PTAX range for {} ({}): {}",
-                            currency, symbol, e
-                        );
-                        continue;
-                    }
+        for (date, close_price) in &history {
+            let brl_rate = if currency != "BRL" {
+                match rate_map.as_ref().and_then(|m| find_closest_rate(m, *date)) {
+                    Some(rate) => rate,
+                    None => continue,
                 }
             } else {
-                None
+                1.0
             };
 
-            for (date, close_price) in &history {
-                let brl_rate = if currency != "BRL" {
-                    match rate_map
-                        .as_ref()
-                        .and_then(|m| find_closest_rate(m, *date))
-                    {
-                        Some(rate) => rate,
-                        None => {
-                            // Skip this date if we can't find a rate
-                            eprintln!(
-                                "[reconcile] warning: no PTAX rate found for {} on {}, skipping",
-                                symbol, date
-                            );
-                            continue;
-                        }
-                    }
-                } else {
-                    1.0
-                };
+            if queries::upsert_daily_price(db, &DailyPrice {
+                symbol: symbol.clone(), date: *date, close_price: *close_price,
+                currency: currency.clone(), brl_rate,
+            }).is_ok() {
+                prices_backfilled += 1;
+            }
+        }
+    }
+    (prices_backfilled, symbols_failed, symbols_up_to_date, false)
+}
 
-                if let Err(e) = queries::upsert_daily_price(
-                    db,
-                    &DailyPrice {
-                        symbol: symbol.clone(),
-                        date: *date,
-                        close_price: *close_price,
-                        currency: currency.clone(),
-                        brl_rate,
-                    },
-                ) {
-                    eprintln!(
-                        "[reconcile] warning: failed to store backfill price for {} on {}: {}",
-                        symbol, date, e
-                    );
-                } else {
-                    prices_backfilled += 1;
-                }
+/// Backfill Tesouro Direto prices from the government CSV.
+async fn backfill_tesouro(
+    db: &Database,
+    symbols: &[(String, String, String)],
+) -> (usize, usize, usize, bool) {
+    if symbols.is_empty() {
+        return (0, 0, 0, false);
+    }
+
+    let today = Local::now().date_naive();
+
+    // Check if any symbol actually needs backfilling
+    let needs_backfill: Vec<_> = symbols
+        .iter()
+        .filter(|(sym, _, _)| {
+            backfill_date_range(db, sym, today)
+                .ok()
+                .flatten()
+                .is_some()
+        })
+        .collect();
+
+    if needs_backfill.is_empty() {
+        return (0, 0, symbols.len(), false);
+    }
+
+    // Fetch the full CSV once
+    let csv_url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv";
+
+    let client = reqwest::Client::builder()
+        .user_agent("investimentos-v2/0.1")
+        .build()
+        .unwrap();
+
+    let body = match client.get(csv_url).send().await {
+        Ok(resp) => match resp.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[reconcile] failed to read Tesouro CSV: {}", e);
+                return (0, symbols.len(), 0, false);
+            }
+        },
+        Err(e) => {
+            eprintln!("[reconcile] failed to fetch Tesouro CSV: {}", e);
+            return (0, symbols.len(), 0, false);
+        }
+    };
+
+    let mut prices_backfilled = 0;
+    let mut symbols_up_to_date = 0;
+
+    for (symbol, _, _) in symbols {
+        let (start, end) = match backfill_date_range(db, symbol, today) {
+            Ok(Some(range)) => range,
+            Ok(None) => {
+                symbols_up_to_date += 1;
+                continue;
+            }
+            Err(_) => continue,
+        };
+
+        // Match our symbol to CSV entries
+        // Our: "Tesouro Selic 2031" → CSV: "Tesouro Selic" with maturity year 2031
+        // Our: "Tesouro IPCA+ 2029" → CSV: "Tesouro IPCA+" with maturity year 2029
+        let (search_type, search_year) = parse_tesouro_symbol(symbol);
+
+        for line in body.lines().skip(1) {
+            let fields: Vec<&str> = line.split(';').collect();
+            if fields.len() < 7 {
+                continue;
+            }
+
+            let tipo = fields[0];
+            let vencimento = fields[1]; // dd/mm/yyyy
+            let data_base = fields[2];  // dd/mm/yyyy
+            let pu_venda = fields[6];   // "PU Venda Manha" - sell price
+
+            // Match bond type and maturity year
+            if !tipo.starts_with(&search_type) {
+                continue;
+            }
+            if !vencimento.ends_with(&search_year) {
+                continue;
+            }
+
+            // Parse date
+            let date = match NaiveDate::parse_from_str(data_base, "%d/%m/%Y") {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+
+            if date < start || date > end {
+                continue;
+            }
+
+            // Parse price (Brazilian format: "1234,56")
+            let price: f64 = match pu_venda.replace('.', "").replace(',', ".").parse() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            if queries::upsert_daily_price(
+                db,
+                &DailyPrice {
+                    symbol: symbol.clone(),
+                    date,
+                    close_price: price,
+                    currency: "BRL".to_string(),
+                    brl_rate: 1.0,
+                },
+            )
+            .is_ok()
+            {
+                prices_backfilled += 1;
             }
         }
     }
 
-    Ok(ReconcileResult {
-        prices_backfilled,
-        rate_limited,
-    })
+    (prices_backfilled, 0, symbols_up_to_date, false)
+}
+
+/// Parse our Tesouro symbol into (type_prefix, maturity_year).
+/// "Tesouro Selic 2031" → ("Tesouro Selic", "2031")
+/// "Tesouro IPCA+ 2029" → ("Tesouro IPCA+", "2029")
+fn parse_tesouro_symbol(symbol: &str) -> (String, String) {
+    // Last 4 chars are the year
+    if symbol.len() > 5 {
+        let year = &symbol[symbol.len() - 4..];
+        let prefix = symbol[..symbol.len() - 5].trim().to_string();
+        (prefix, year.to_string())
+    } else {
+        (symbol.to_string(), String::new())
+    }
+}
+
+/// Compute the date range that needs backfilling for a symbol.
+fn backfill_date_range(
+    db: &Database,
+    symbol: &str,
+    today: NaiveDate,
+) -> Result<Option<(NaiveDate, NaiveDate)>, Box<dyn std::error::Error>> {
+    let txs = queries::get_transactions_by_symbol(db, symbol)?;
+    let first_tx_date = match txs.first() {
+        Some(tx) => tx.date,
+        None => return Ok(None),
+    };
+
+    let earliest_price = {
+        let mut stmt = db.conn().prepare("SELECT MIN(date) FROM daily_prices WHERE symbol = ?")?;
+        let result: Option<String> = stmt.query_row([symbol], |row| row.get(0)).ok().flatten();
+        result.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+    };
+
+    let (start, end) = match earliest_price {
+        None => (first_tx_date, today),
+        Some(ep) if ep > first_tx_date => (first_tx_date, ep - Duration::days(1)),
+        Some(_) => {
+            match queries::get_latest_price_date(db, symbol)? {
+                Some(last) if last >= today - Duration::days(1) => return Ok(None),
+                Some(last) => (last + Duration::days(1), today),
+                None => (first_tx_date, today),
+            }
+        }
+    };
+
+    if start >= end { return Ok(None); }
+    Ok(Some((start, end)))
 }
 
 /// Check if an error indicates rate limiting.

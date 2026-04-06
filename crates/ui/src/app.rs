@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use gpui::{
     div, prelude::*, rgb, AnyElement, ClickEvent, Context, FocusHandle, FontWeight, KeyDownEvent,
@@ -10,6 +11,17 @@ use investimentos_core::export;
 
 use crate::theme;
 use crate::views;
+
+// ---------------------------------------------------------------------------
+// Background backfill state
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Default)]
+pub struct BackfillStatus {
+    pub running: bool,
+    pub last_message: Option<String>,
+    pub total_backfilled: usize,
+}
 
 // ---------------------------------------------------------------------------
 // Tab enum
@@ -69,6 +81,10 @@ pub struct AppRoot {
     // Positions state
     pub positions_sort: views::positions::SortState,
     pub selected_position: Option<usize>,
+    pub history_range: views::history::TimeRange,
+    pub history_split: bool,
+    pub backfill_status: Arc<Mutex<BackfillStatus>>,
+    sync_menu_open: bool,
 }
 
 impl AppRoot {
@@ -77,6 +93,11 @@ impl AppRoot {
         let settings_focus = cx.focus_handle();
         let gold_focus = cx.focus_handle();
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let backfill_status = Arc::new(Mutex::new(BackfillStatus::default()));
+
+        // Start background backfill worker
+        Self::start_backfill_worker(db_path.clone(), backfill_status.clone(), cx);
+
         Self {
             mode: AppMode::Tab(Tab::Overview),
             last_tab: Tab::Overview,
@@ -91,6 +112,10 @@ impl AppRoot {
             gold_focus,
             positions_sort: views::positions::SortState::default(),
             selected_position: None,
+            history_range: views::history::TimeRange::default(),
+            history_split: false,
+            backfill_status,
+            sync_menu_open: false,
         }
     }
 
@@ -418,6 +443,118 @@ impl AppRoot {
         }).detach();
     }
 
+    fn start_backfill_worker(
+        db_path: PathBuf,
+        status: Arc<Mutex<BackfillStatus>>,
+        cx: &mut Context<Self>,
+    ) {
+        let status_writer = status.clone();
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                // Initial delay — let the app render first
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+                loop {
+                    let db = match Database::open(&db_path) {
+                        Ok(db) => db,
+                        Err(_) => {
+                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                            continue;
+                        }
+                    };
+
+                    {
+                        let mut s = status_writer.lock().unwrap();
+                        s.running = true;
+                        s.last_message = Some("Backfilling...".to_string());
+                    }
+
+                    match investimentos_core::reconcile::backfill_prices(&db).await {
+                        Ok(r) => {
+                            let mut s = status_writer.lock().unwrap();
+                            s.total_backfilled += r.prices_backfilled;
+
+                            // Done when no prices were backfilled AND not rate-limited
+                            // (all symbols are either up-to-date or permanently failed)
+                            if r.prices_backfilled == 0 && !r.rate_limited {
+                                s.running = false;
+                                if r.symbols_failed > 0 {
+                                    s.last_message = Some(format!(
+                                        "Backfill done ({} prices, {} symbols failed)",
+                                        s.total_backfilled, r.symbols_failed
+                                    ));
+                                } else {
+                                    s.last_message = Some(format!(
+                                        "Backfill complete ({} prices)",
+                                        s.total_backfilled
+                                    ));
+                                }
+                                break;
+                            }
+
+                            if r.rate_limited {
+                                s.last_message = Some(format!(
+                                    "Backfilling... {} prices ({} up to date, {} pending) — rate limited, waiting 60s",
+                                    s.total_backfilled, r.symbols_up_to_date,
+                                    r.symbols_up_to_date.max(1) - 1 // rough pending count
+                                ));
+                            } else {
+                                s.last_message = Some(format!(
+                                    "Backfilling... +{} prices this batch ({} total)",
+                                    r.prices_backfilled, s.total_backfilled
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            let mut s = status_writer.lock().unwrap();
+                            s.last_message = Some(format!("Backfill error: {}", e));
+                        }
+                    }
+
+                    // Wait between batches (longer if rate-limited)
+                    let wait = {
+                        let s = status_writer.lock().unwrap();
+                        if s.last_message.as_ref().map_or(false, |m| m.contains("rate limited")) {
+                            60
+                        } else {
+                            5
+                        }
+                    };
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                }
+            });
+        });
+
+        // Poll backfill status to update UI periodically
+        let status_reader = status;
+        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_secs(5)).await;
+                let still_running = {
+                    let s = status_reader.lock().unwrap();
+                    s.running
+                };
+                // Trigger UI refresh so history tab picks up new data
+                let _ = this.update(cx, |_this, cx: &mut Context<Self>| {
+                    cx.notify();
+                });
+                if !still_running {
+                    break;
+                }
+            }
+        }).detach();
+    }
+
+    fn do_full_resync(&mut self, cx: &mut Context<Self>) {
+        // Clear all cached prices so everything gets re-fetched
+        let _ = self.db.conn().execute("DELETE FROM daily_prices", []);
+        self.status_message = Some("Cleared price cache, resyncing...".to_string());
+        cx.notify();
+        self.do_sync(cx);
+    }
+
     fn do_sync(&mut self, cx: &mut Context<Self>) {
         if self.syncing {
             return;
@@ -445,28 +582,10 @@ impl AppRoot {
                     Err(e) => return format!("DB error: {e}"),
                 };
 
-                let mut parts = Vec::new();
-
-                // Fetch current prices
                 match investimentos_core::reconcile::fetch_current_prices(&db).await {
-                    Ok(n) => parts.push(format!("{n} prices fetched")),
-                    Err(e) => parts.push(format!("Price fetch: {e}")),
+                    Ok(n) => format!("{n} current prices fetched"),
+                    Err(e) => format!("Price fetch error: {e}"),
                 }
-
-                // Backfill historical prices
-                match investimentos_core::reconcile::backfill_prices(&db).await {
-                    Ok(r) => {
-                        if r.prices_backfilled > 0 {
-                            parts.push(format!("{} prices backfilled", r.prices_backfilled));
-                        }
-                        if r.rate_limited {
-                            parts.push("rate limited, will resume next sync".to_string());
-                        }
-                    }
-                    Err(e) => parts.push(format!("Backfill: {e}")),
-                }
-
-                parts.join(". ")
             });
             *slot_writer.lock().unwrap() = Some(msg);
         });
@@ -524,7 +643,14 @@ impl Render for AppRoot {
             .child(self.render_content(cx));
 
         // Status bar at the bottom
-        if let Some(ref msg) = self.status_message {
+        let backfill_msg = self.backfill_status.lock().unwrap().last_message.clone();
+        let status_text = match (&self.status_message, &backfill_msg) {
+            (Some(msg), Some(bf)) => Some(format!("{} | {}", msg, bf)),
+            (Some(msg), None) => Some(msg.clone()),
+            (None, Some(bf)) => Some(bf.clone()),
+            (None, None) => None,
+        };
+        if let Some(msg) = status_text {
             root = root.child(
                 div()
                     .px_4()
@@ -534,7 +660,7 @@ impl Render for AppRoot {
                     .border_color(theme::BORDER)
                     .text_xs()
                     .text_color(theme::TEXT_SECONDARY)
-                    .child(msg.clone()),
+                    .child(msg),
             );
         }
 
@@ -644,10 +770,80 @@ impl AppRoot {
             .child({
                 let sync_label = if self.syncing { "Syncing..." } else { "Sync" };
                 let sync_color = if self.syncing { theme::TEXT_SECONDARY } else { rgb(0x06b6d4) };
-                action_button("sync-btn", sync_label, sync_color)
-                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
-                        this.do_sync(cx);
-                    }))
+                let menu_open = self.sync_menu_open;
+
+                div()
+                    .relative()
+                    .flex()
+                    .flex_row()
+                    .child(
+                        // Main sync button
+                        div()
+                            .id("sync-btn")
+                            .px_3()
+                            .py_1()
+                            .rounded_l_md()
+                            .bg(sync_color)
+                            .text_color(rgb(0xffffff))
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .cursor_pointer()
+                            .hover(|s| s.opacity(0.85))
+                            .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                                this.sync_menu_open = false;
+                                this.do_sync(cx);
+                            }))
+                            .child(sync_label),
+                    )
+                    .child(
+                        // Dropdown arrow
+                        div()
+                            .id("sync-menu-btn")
+                            .px_1()
+                            .py_1()
+                            .rounded_r_md()
+                            .bg(sync_color)
+                            .text_color(rgb(0xffffff))
+                            .text_sm()
+                            .cursor_pointer()
+                            .border_l_1()
+                            .border_color(rgb(0xffffff))
+                            .hover(|s| s.opacity(0.85))
+                            .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                                this.sync_menu_open = !this.sync_menu_open;
+                                cx.notify();
+                            }))
+                            .child("\u{25BC}"),
+                    )
+                    .when(menu_open, |el| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .top(gpui::px(30.0))
+                                .right_0()
+                                .rounded_md()
+                                .bg(theme::BG_SECONDARY)
+                                .border_1()
+                                .border_color(theme::BORDER)
+                                .shadow_md()
+                                .child(
+                                    div()
+                                        .id("full-resync-btn")
+                                        .px_3()
+                                        .py_2()
+                                        .text_sm()
+                                        .whitespace_nowrap()
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(theme::BORDER))
+                                        .rounded_md()
+                                        .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                                            this.sync_menu_open = false;
+                                            this.do_full_resync(cx);
+                                        }))
+                                        .child("Full Resync"),
+                                ),
+                        )
+                    })
             })
             .child(
                 action_button("settings-btn", "Settings", theme::BORDER)
@@ -663,7 +859,7 @@ impl AppRoot {
             AppMode::Tab(Tab::Overview) => views::overview::render_overview(&self.db),
             AppMode::Tab(Tab::Positions) => views::positions::render_positions(&self.db, self.positions_sort, self.selected_position, cx),
             AppMode::Tab(Tab::Income) => views::income::render_income(&self.db),
-            AppMode::Tab(Tab::History) => views::history::render_history(&self.db),
+            AppMode::Tab(Tab::History) => views::history::render_history(&self.db, self.history_range, self.history_split, cx),
             AppMode::Import => self.render_import_mode(cx),
             AppMode::ManualGold => self.render_gold_mode(cx),
             AppMode::Settings => self.render_settings_mode(cx),

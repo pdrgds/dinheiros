@@ -223,10 +223,14 @@ pub fn set_config(db: &Database, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// Get symbols with positive net holdings (active positions only).
 pub fn get_distinct_symbols(db: &Database) -> Result<Vec<(String, String, String)>> {
     let mut stmt = db.conn().prepare(
-        "SELECT DISTINCT symbol, asset_type, currency
-         FROM transactions WHERE tx_type IN ('buy', 'sell')
+        "SELECT symbol, asset_type, currency
+         FROM transactions
+         WHERE tx_type IN ('buy', 'sell')
+         GROUP BY symbol, currency
+         HAVING SUM(CASE WHEN tx_type='buy' THEN quantity ELSE -quantity END) > 0.0001
          ORDER BY symbol",
     )?;
     let rows = stmt.query_map([], |row| {
