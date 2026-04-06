@@ -57,6 +57,7 @@ pub struct AppRoot {
     last_tab: Tab,
     db: Database,
     status_message: Option<String>,
+    syncing: bool,
     // Settings editing state
     settings_fields: [String; 3],
     settings_active_field: Option<usize>,
@@ -72,6 +73,7 @@ impl AppRoot {
             last_tab: Tab::Overview,
             db,
             status_message: None,
+            syncing: false,
             settings_fields: [String::new(), String::new(), String::new()],
             settings_active_field: None,
             settings_focus: focus,
@@ -200,6 +202,129 @@ impl AppRoot {
         self.mode = AppMode::Tab(self.last_tab);
         self.status_message = None;
         cx.notify();
+    }
+
+    fn do_sync(&mut self, cx: &mut Context<Self>) {
+        if self.syncing {
+            return;
+        }
+        self.syncing = true;
+        self.status_message = Some("Syncing...".to_string());
+        cx.notify();
+
+        // DB path for the background thread (separate connection)
+        let db_path: PathBuf = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("investimentos-v2")
+            .join("data.db");
+
+        // Shared result slot
+        let result_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let slot_writer = result_slot.clone();
+
+        // Run sync in a std::thread
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let msg = rt.block_on(async {
+                let db = match Database::open(&db_path) {
+                    Ok(db) => db,
+                    Err(e) => return format!("DB error: {e}"),
+                };
+
+                let mut parts = Vec::new();
+
+                // Step 1: Try IBKR Flex fetch if configured
+                let token = investimentos_core::db::queries::get_config(&db, "ibkr_flex_token")
+                    .ok().flatten().unwrap_or_default();
+                let query_id = investimentos_core::db::queries::get_config(&db, "ibkr_flex_query_id")
+                    .ok().flatten().unwrap_or_default();
+
+                if !token.is_empty() && !query_id.is_empty() {
+                    match investimentos_core::api::ibkr_flex::fetch_flex_statement(&token, &query_id).await {
+                        Ok(xml) => {
+                            // Debug: dump raw XML for inspection
+                            let _ = std::fs::write("/tmp/ibkr_flex_debug.xml", &xml);
+
+                            match investimentos_core::parsers::ibkr_flex::parse_flex_xml(&xml) {
+                                Ok(result) => {
+                                    let mut tx_new = 0u32;
+                                    let mut inc_new = 0u32;
+
+                                    for tx in &result.transactions {
+                                        match investimentos_core::db::queries::insert_transaction(&db, tx) {
+                                            Ok(true) => tx_new += 1,
+                                            Ok(false) => {} // duplicate, already exists
+                                            Err(e) => {
+                                                parts.push(format!("IBKR tx insert err: {e}"));
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    for inc in &result.income {
+                                        match investimentos_core::db::queries::insert_income(&db, inc) {
+                                            Ok(true) => inc_new += 1,
+                                            Ok(false) => {} // duplicate
+                                            Err(e) => {
+                                                parts.push(format!("IBKR income insert err: {e}"));
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    parts.push(format!(
+                                        "IBKR: {} trades ({} new), {} income ({} new)",
+                                        result.transactions.len(),
+                                        tx_new,
+                                        result.income.len(),
+                                        inc_new,
+                                    ));
+                                }
+                                Err(e) => parts.push(format!("IBKR parse: {e}")),
+                            }
+                        }
+                        Err(e) => parts.push(format!("IBKR: {e}")),
+                    }
+                }
+
+                // Step 2: Fetch current prices
+                match investimentos_core::reconcile::fetch_current_prices(&db).await {
+                    Ok(n) => parts.push(format!("{n} prices fetched")),
+                    Err(e) => parts.push(format!("Price fetch: {e}")),
+                }
+
+                // Step 3: Backfill historical prices
+                match investimentos_core::reconcile::backfill_prices(&db).await {
+                    Ok(r) => {
+                        if r.prices_backfilled > 0 {
+                            parts.push(format!("{} prices backfilled", r.prices_backfilled));
+                        }
+                        if r.rate_limited {
+                            parts.push("rate limited, will resume next sync".to_string());
+                        }
+                    }
+                    Err(e) => parts.push(format!("Backfill: {e}")),
+                }
+
+                parts.join(". ")
+            });
+            *slot_writer.lock().unwrap() = Some(msg);
+        });
+
+        // Poll for the result from GPUI's async executor
+        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+            loop {
+                if let Some(msg) = result_slot.lock().unwrap().take() {
+                    let _ = this.update(cx, |this, cx: &mut Context<Self>| {
+                        this.syncing = false;
+                        this.status_message = Some(msg);
+                        cx.notify();
+                    });
+                    break;
+                }
+                gpui::Timer::after(std::time::Duration::from_millis(200)).await;
+            }
+        }).detach();
     }
 
     fn do_export(&mut self, cx: &mut Context<Self>) {
@@ -356,6 +481,14 @@ impl AppRoot {
                         this.do_export(cx);
                     })),
             )
+            .child({
+                let sync_label = if self.syncing { "Syncing..." } else { "Sync" };
+                let sync_color = if self.syncing { theme::TEXT_SECONDARY } else { rgb(0x06b6d4) };
+                action_button("sync-btn", sync_label, sync_color)
+                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                        this.do_sync(cx);
+                    }))
+            })
             .child(
                 action_button("settings-btn", "Settings", theme::BORDER)
                     .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {

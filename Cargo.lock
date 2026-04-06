@@ -3029,6 +3029,7 @@ dependencies = [
  "ib-flex",
  "reqwest",
  "rusqlite",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",
@@ -3048,6 +3049,7 @@ dependencies = [
  "gpui-ce",
  "investimentos-core",
  "rusqlite",
+ "tokio",
 ]
 
 [[package]]

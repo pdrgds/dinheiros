@@ -1,7 +1,122 @@
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
+use rust_decimal::prelude::ToPrimitive;
 use sha2::{Digest, Sha256};
 
 use crate::{AssetType, Income, IncomeType, Source, Transaction, TxType};
+
+/// Result of parsing an IBKR Flex XML statement.
+pub struct IbkrImportResult {
+    pub transactions: Vec<Transaction>,
+    pub income: Vec<Income>,
+}
+
+/// Parse an IBKR Activity Flex XML string into transactions and income records.
+///
+/// Uses the `ib-flex` crate for XML deserialization, then converts the parsed
+/// trades and cash transactions into our domain types. BRL rate is set to 1.0
+/// as a placeholder -- actual PTAX rates should be applied in a follow-up.
+pub fn parse_flex_xml(xml: &str) -> Result<IbkrImportResult, Box<dyn std::error::Error>> {
+    let statement = ib_flex::parse_activity_flex(xml)?;
+
+    // --- Trades → Transactions ---
+    let mut transactions = Vec::new();
+    for trade in &statement.trades.items {
+        let date = match trade.trade_date {
+            Some(d) => d,
+            None => continue, // skip summary rows without a date
+        };
+        let quantity = match trade.quantity {
+            Some(q) => q.to_f64().unwrap_or(0.0),
+            None => continue,
+        };
+        if quantity == 0.0 {
+            continue;
+        }
+        let price = trade.price.and_then(|p| p.to_f64()).unwrap_or(0.0);
+        let proceeds = trade.proceeds.and_then(|p| p.to_f64()).unwrap_or(0.0);
+        let commission = trade.commission.and_then(|c| c.to_f64()).unwrap_or(0.0);
+
+        let tx = trade_to_transaction(
+            &trade.symbol,
+            &trade.currency,
+            date,
+            quantity,
+            price,
+            proceeds,
+            commission,
+            1.0, // placeholder BRL rate
+        );
+        transactions.push(tx);
+    }
+
+    // --- CashTransactions → Income (dividends + withholding tax) ---
+    // Group dividends and taxes by (symbol, date) so we can pair them.
+    let mut dividends: HashMap<(String, NaiveDate), (f64, String)> = HashMap::new(); // (gross, currency)
+    let mut taxes: HashMap<(String, NaiveDate), (f64, String)> = HashMap::new(); // (tax_amount, tax_origin)
+
+    for ct in &statement.cash_transactions.items {
+        let tx_type = ct.transaction_type.as_deref().unwrap_or("");
+        let symbol = ct.symbol.as_deref().unwrap_or("");
+        let date = match ct.date {
+            Some(d) => d,
+            None => continue,
+        };
+
+        if symbol.is_empty() {
+            continue;
+        }
+
+        match tx_type {
+            "Dividends" | "Payment In Lieu Of Dividends" => {
+                let amount = ct.amount.to_f64().unwrap_or(0.0);
+                let currency = ct.currency.clone();
+                let key = (symbol.to_string(), date);
+                let entry = dividends.entry(key).or_insert((0.0, currency));
+                entry.0 += amount;
+            }
+            "Withholding Tax" => {
+                let amount = ct.amount.to_f64().unwrap_or(0.0);
+                let desc = ct.description.as_deref().unwrap_or("");
+                let (_, tax_origin) = parse_tax_description(desc);
+                let key = (symbol.to_string(), date);
+                let entry = taxes.entry(key).or_insert((0.0, tax_origin));
+                entry.0 += amount; // amount is negative for tax withheld
+            }
+            _ => {} // skip other cash transaction types
+        }
+    }
+
+    // Build Income records by merging dividends with their withholding tax.
+    let mut income = Vec::new();
+    for ((symbol, date), (gross, currency)) in &dividends {
+        let (tax_amount, tax_origin) = taxes
+            .get(&(symbol.clone(), *date))
+            .cloned()
+            .unwrap_or((0.0, String::new()));
+
+        let inc = dividend_to_income(
+            symbol,
+            currency,
+            *date,
+            *gross,
+            tax_amount, // negative from IBKR, dividend_to_income takes abs
+            &tax_origin,
+            1.0, // placeholder BRL rate
+        );
+        income.push(inc);
+    }
+
+    // Sort for deterministic output
+    transactions.sort_by_key(|t| (t.date, t.symbol.clone()));
+    income.sort_by_key(|i| (i.date, i.symbol.clone()));
+
+    Ok(IbkrImportResult {
+        transactions,
+        income,
+    })
+}
 
 /// Classify an IBKR asset. All IBKR assets are international from a Brazilian perspective.
 pub fn classify_ibkr_asset(_symbol: &str, _currency: &str) -> AssetType {
