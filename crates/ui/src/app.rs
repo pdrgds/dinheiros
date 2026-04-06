@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use gpui::{
-    div, prelude::*, rgb, AnyElement, ClickEvent, Context, FontWeight, SharedString, Window,
+    div, prelude::*, rgb, AnyElement, ClickEvent, Context, FocusHandle, FontWeight, KeyDownEvent,
+    SharedString, Window,
 };
 
 use investimentos_core::db::Database;
@@ -56,16 +57,24 @@ pub struct AppRoot {
     last_tab: Tab,
     db: Database,
     status_message: Option<String>,
+    // Settings editing state
+    settings_fields: [String; 3],
+    settings_active_field: Option<usize>,
+    settings_focus: FocusHandle,
 }
 
 impl AppRoot {
-    pub fn new(db_path: PathBuf) -> Self {
+    pub fn new(db_path: PathBuf, cx: &mut Context<Self>) -> Self {
         let db = Database::open(&db_path).expect("Failed to open database");
+        let focus = cx.focus_handle();
         Self {
             mode: AppMode::Tab(Tab::Overview),
             last_tab: Tab::Overview,
             db,
             status_message: None,
+            settings_fields: [String::new(), String::new(), String::new()],
+            settings_active_field: None,
+            settings_focus: focus,
         }
     }
 
@@ -80,9 +89,111 @@ impl AppRoot {
         if let AppMode::Tab(t) = self.mode {
             self.last_tab = t;
         }
+        if mode == AppMode::Settings {
+            self.load_settings_from_db();
+        }
         self.mode = mode;
         self.status_message = None;
         cx.notify();
+    }
+
+    fn load_settings_from_db(&mut self) {
+        use investimentos_core::db::queries;
+        let keys = ["ibkr_flex_token", "ibkr_flex_query_id", "coingecko_api_key"];
+        for (i, key) in keys.iter().enumerate() {
+            self.settings_fields[i] = queries::get_config(&self.db, key)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+        }
+        self.settings_active_field = None;
+    }
+
+    fn save_settings_to_db(&mut self, cx: &mut Context<Self>) {
+        use investimentos_core::db::queries;
+        let keys = ["ibkr_flex_token", "ibkr_flex_query_id", "coingecko_api_key"];
+        let mut errors = Vec::new();
+        for (i, key) in keys.iter().enumerate() {
+            if let Err(e) = queries::set_config(&self.db, key, &self.settings_fields[i]) {
+                errors.push(format!("{}: {}", key, e));
+            }
+        }
+        if errors.is_empty() {
+            self.status_message = Some("Settings saved.".to_string());
+        } else {
+            self.status_message = Some(format!("Save errors: {}", errors.join(", ")));
+        }
+        self.settings_active_field = None;
+        cx.notify();
+    }
+
+    fn handle_settings_key(
+        &mut self,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(idx) = self.settings_active_field else {
+            return;
+        };
+
+        let keystroke = &event.keystroke;
+
+        // Cmd+V (paste)
+        if keystroke.modifiers.platform && keystroke.key == "v" {
+            if let Some(item) = cx.read_from_clipboard() {
+                if let Some(text) = item.text() {
+                    // Take only the first line and trim
+                    let clean: String = text.lines().next().unwrap_or("").trim().to_string();
+                    self.settings_fields[idx] = clean;
+                    cx.notify();
+                }
+            }
+            return;
+        }
+
+        // Cmd+A (select all / clear for simplicity)
+        if keystroke.modifiers.platform && keystroke.key == "a" {
+            // No-op or select all - we just ignore
+            return;
+        }
+
+        // Ignore other modifier combos (Cmd+X, Cmd+C, etc.)
+        if keystroke.modifiers.platform || keystroke.modifiers.control {
+            return;
+        }
+
+        match keystroke.key.as_str() {
+            "backspace" => {
+                self.settings_fields[idx].pop();
+                cx.notify();
+            }
+            "escape" => {
+                self.settings_active_field = None;
+                cx.notify();
+            }
+            "tab" => {
+                // Move to next field
+                self.settings_active_field = Some((idx + 1) % 3);
+                cx.notify();
+            }
+            "enter" => {
+                // Move to next field or deselect on last
+                if idx < 2 {
+                    self.settings_active_field = Some(idx + 1);
+                } else {
+                    self.settings_active_field = None;
+                }
+                cx.notify();
+            }
+            _ => {
+                // Type the character
+                if let Some(ref ch) = keystroke.key_char {
+                    self.settings_fields[idx].push_str(ch);
+                    cx.notify();
+                }
+            }
+        }
     }
 
     fn go_back(&mut self, cx: &mut Context<Self>) {
@@ -268,10 +379,7 @@ impl AppRoot {
                 views::manual::render_manual_gold(),
                 cx,
             ),
-            AppMode::Settings => self.render_mode_with_back(
-                views::settings::render_settings(&self.db),
-                cx,
-            ),
+            AppMode::Settings => self.render_settings_mode(cx),
         }
     }
 
@@ -311,11 +419,197 @@ impl AppRoot {
                     .child(format!("Back to {}", last_tab_label)),
             )
     }
+
+    // ----- Settings mode -----
+    fn render_settings_mode(&self, cx: &mut Context<Self>) -> AnyElement {
+        let labels = ["IBKR Flex Token", "IBKR Flex Query ID", "CoinGecko API Key"];
+
+        let mut content = div()
+            .id("settings-panel")
+            .track_focus(&self.settings_focus)
+            .flex()
+            .flex_col()
+            .gap_6()
+            .p_6()
+            .w_full()
+            .flex_1()
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                this.handle_settings_key(ev, window, cx);
+            }));
+
+        content = content.child(
+            div()
+                .text_2xl()
+                .font_weight(FontWeight::BOLD)
+                .child("Settings"),
+        );
+
+        // Config fields panel
+        let mut panel = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .rounded_lg()
+            .bg(theme::BG_SECONDARY)
+            .border_1()
+            .border_color(theme::BORDER);
+
+        panel = panel.child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::TEXT_SECONDARY)
+                .child("Configuration"),
+        );
+
+        for (i, label) in labels.iter().enumerate() {
+            let value = self.settings_fields[i].clone();
+            let is_active = self.settings_active_field == Some(i);
+            panel = panel.child(self.render_editable_row(i, label, &value, is_active, cx));
+        }
+
+        content = content.child(panel);
+
+        // Save button
+        content = content.child(
+            div().flex().flex_row().gap_2().child(
+                div()
+                    .id("save-settings-btn")
+                    .px_4()
+                    .py_2()
+                    .rounded_md()
+                    .bg(theme::GREEN)
+                    .text_color(rgb(0xffffff))
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .cursor_pointer()
+                    .hover(|style| style.opacity(0.85))
+                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                        this.save_settings_to_db(cx);
+                    }))
+                    .child("Save"),
+            ),
+        );
+
+        // Hint
+        content = content.child(
+            div()
+                .text_sm()
+                .text_color(theme::TEXT_SECONDARY)
+                .child("Click a field to edit. Type to enter text. Cmd+V to paste. Enter/Tab to move to next field."),
+        );
+
+        // Wrap with back bar
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .flex_1()
+            .child(content)
+            .child(self.render_back_bar(cx))
+            .into_any_element()
+    }
+
+    fn render_editable_row(
+        &self,
+        index: usize,
+        label: &str,
+        value: &str,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let display_value = if is_active {
+            if value.is_empty() {
+                String::new()
+            } else {
+                value.to_string()
+            }
+        } else if value.is_empty() {
+            "(not set)".to_string()
+        } else {
+            mask_value(value)
+        };
+
+        let border_col = if is_active {
+            theme::ACCENT
+        } else {
+            theme::BORDER
+        };
+
+        let field_bg = if is_active {
+            rgb(0x0d0d1a)
+        } else {
+            theme::BG_PRIMARY
+        };
+
+        let text_col = if value.is_empty() && !is_active {
+            theme::TEXT_SECONDARY
+        } else {
+            theme::TEXT_PRIMARY
+        };
+
+        let id = SharedString::from(format!("settings-field-{}", index));
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_4()
+            .py_1()
+            .border_b_1()
+            .border_color(theme::BORDER)
+            .child(
+                div()
+                    .w(gpui::px(160.0))
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(label.to_string()),
+            )
+            .child(
+                div()
+                    .id(id)
+                    .flex_1()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .bg(field_bg)
+                    .border_1()
+                    .border_color(border_col)
+                    .text_sm()
+                    .text_color(text_col)
+                    .cursor_pointer()
+                    .min_h(gpui::px(28.0))
+                    .on_click(cx.listener(move |this, _ev: &ClickEvent, window, cx| {
+                        this.settings_active_field = Some(index);
+                        this.settings_focus.focus(window);
+                        cx.notify();
+                    }))
+                    .child(if is_active && display_value.is_empty() {
+                        // Show blinking cursor placeholder
+                        "\u{258F}".to_string() // thin cursor char
+                    } else if is_active {
+                        format!("{}\u{258F}", display_value)
+                    } else {
+                        display_value
+                    }),
+            )
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Action button helper
 // ---------------------------------------------------------------------------
+
+/// Mask a config value, showing only the first 4 and last 2 characters.
+fn mask_value(v: &str) -> String {
+    if v.len() <= 6 {
+        return "****".to_string();
+    }
+    let first = &v[..4];
+    let last = &v[v.len() - 2..];
+    format!("{}...{}", first, last)
+}
 
 fn action_button(
     id: &'static str,

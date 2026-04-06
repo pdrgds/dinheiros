@@ -28,7 +28,7 @@ fn main() {
                 }),
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_cx| app::AppRoot::new(db_path)),
+            |_window, cx| cx.new(|cx| app::AppRoot::new(db_path, cx)),
         )
         .unwrap();
 
