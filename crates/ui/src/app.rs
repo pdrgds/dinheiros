@@ -933,7 +933,7 @@ fn import_ibkr_csv(
         if !line.starts_with("Trades,Data,Order,") {
             continue;
         }
-        let fields: Vec<&str> = line.split(',').collect();
+        let fields = split_csv_line(line);
         if fields.len() < 15 {
             continue;
         }
@@ -950,7 +950,8 @@ fn import_ibkr_csv(
             continue;
         }
 
-        let date_str = datetime.split(',').next().unwrap_or("").trim();
+        // Date is "2024-10-09, 09:37:52" — take first 10 chars
+        let date_str = &datetime[..datetime.len().min(10)];
         let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
             Ok(d) => d,
             Err(_) => continue,
@@ -971,7 +972,7 @@ fn import_ibkr_csv(
         if !line.starts_with("Dividends,Data,") || line.starts_with("Dividends,Data,Total") {
             continue;
         }
-        let fields: Vec<&str> = line.split(',').collect();
+        let fields = split_csv_line(line);
         if fields.len() < 6 {
             continue;
         }
@@ -1001,7 +1002,7 @@ fn import_ibkr_csv(
             {
                 continue;
             }
-            let tf: Vec<&str> = tax_line.split(',').collect();
+            let tf = split_csv_line(tax_line);
             if tf.len() < 6 {
                 continue;
             }
@@ -1039,4 +1040,24 @@ fn import_ibkr_csv(
         inc_new + inc_dup,
         inc_new,
     ))
+}
+
+/// Split a CSV line respecting quoted fields (handles commas inside quotes).
+fn split_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in line.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                fields.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    fields.push(current);
+    fields
 }
