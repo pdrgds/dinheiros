@@ -1,0 +1,9 @@
+[package]
+name = "investimentos-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+investimentos-core = { path = "../core" }
+# gpui-ce = { package = "gpui-ce", version = "0.3" }
+# TODO: re-enable once UI crate is implemented in Task 11
