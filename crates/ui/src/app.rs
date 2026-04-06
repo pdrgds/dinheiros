@@ -1,8 +1,13 @@
+use std::path::PathBuf;
+
 use gpui::{
-    div, prelude::*, rgb, ClickEvent, Context, FontWeight, SharedString, Window,
+    div, prelude::*, rgb, AnyElement, ClickEvent, Context, FontWeight, SharedString, Window,
 };
 
+use investimentos_core::db::Database;
+
 use crate::theme;
+use crate::views;
 
 // ---------------------------------------------------------------------------
 // Tab enum
@@ -35,12 +40,15 @@ impl Tab {
 
 pub struct AppRoot {
     active_tab: Tab,
+    db: Database,
 }
 
 impl AppRoot {
-    pub fn new() -> Self {
+    pub fn new(db_path: PathBuf) -> Self {
+        let db = Database::open(&db_path).expect("Failed to open database");
         Self {
             active_tab: Tab::Overview,
+            db,
         }
     }
 
@@ -151,19 +159,25 @@ impl AppRoot {
     }
 
     // ----- content area -----
-    fn render_content(&self, active: Tab) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .text_2xl()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::TEXT_SECONDARY)
-                    .child(format!("{} (coming soon)", active.label())),
-            )
+    fn render_content(&self, active: Tab) -> AnyElement {
+        match active {
+            Tab::Overview => views::overview::render_overview(&self.db),
+            Tab::Positions => views::positions::render_positions(&self.db),
+            Tab::Income => views::income::render_income(&self.db),
+            Tab::History => div()
+                .flex()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .text_2xl()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(theme::TEXT_SECONDARY)
+                        .child("History (coming soon)"),
+                )
+                .into_any_element(),
+        }
     }
 }
 
