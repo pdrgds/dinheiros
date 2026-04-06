@@ -3043,9 +3043,11 @@ dependencies = [
 name = "investimentos-ui"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dirs 5.0.1",
  "gpui-ce",
  "investimentos-core",
+ "rusqlite",
 ]
 
 [[package]]

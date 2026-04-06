@@ -1,6 +1,10 @@
+pub mod history;
+pub mod import;
 pub mod income;
+pub mod manual;
 pub mod overview;
 pub mod positions;
+pub mod settings;
 
 /// Format a float as Brazilian Real: dots for thousands, comma for decimals.
 /// E.g. 142387.52 → "142.387,52"
