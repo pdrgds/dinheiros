@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{Duration, Local, NaiveDate};
 
-use crate::api::{bcb_ptax, coingecko, yahoo};
+use crate::api::{bcb_ptax, coingecko, tesouro, yahoo};
 use crate::db::queries;
 use crate::db::Database;
 use crate::types::DailyPrice;
@@ -24,6 +24,32 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
     for (symbol, asset_type, currency) in &symbols {
         if asset_type == "crypto" {
             has_crypto = true;
+            continue;
+        }
+
+        // Tesouro Direto: use radaropcoes API
+        if tesouro::is_tesouro(symbol) {
+            match tesouro::fetch_tesouro_price(symbol).await {
+                Ok(price) => {
+                    if let Err(e) = queries::upsert_daily_price(
+                        db,
+                        &DailyPrice {
+                            symbol: symbol.clone(),
+                            date: today,
+                            close_price: price,
+                            currency: "BRL".to_string(),
+                            brl_rate: 1.0,
+                        },
+                    ) {
+                        eprintln!("[reconcile] warning: failed to store Tesouro price for {}: {}", symbol, e);
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[reconcile] warning: failed to fetch Tesouro price for {}: {}", symbol, e);
+                }
+            }
             continue;
         }
 
@@ -122,6 +148,11 @@ pub async fn backfill_prices(db: &Database) -> Result<ReconcileResult, Box<dyn s
     for (symbol, asset_type, currency) in &symbols {
         if rate_limited {
             break;
+        }
+
+        // Skip Tesouro Direto for backfill — radaropcoes has no historical API
+        if tesouro::is_tesouro(symbol) {
+            continue;
         }
 
         // Determine start date: day after last stored price, or earliest transaction date
