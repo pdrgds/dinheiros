@@ -47,14 +47,12 @@ pub fn render_overview(db: &Database) -> AnyElement {
     let total_value_brl: f64 = positions.iter().filter_map(|p| p.current_value_brl).sum();
 
     div()
-        .id("overview-scroll")
         .flex()
         .flex_col()
         .gap_6()
         .p_6()
         .w_full()
         .flex_1()
-        .overflow_y_scroll()
         .child(render_total(total_value_brl))
         .child(render_allocation_panel(&allocations))
         .child(render_holdings_table(&positions))
