@@ -137,7 +137,7 @@ fn render_allocation_chip(alloc: &Allocation) -> Div {
 // Holdings table
 // ---------------------------------------------------------------------------
 
-fn render_holdings_table(positions: &[Position]) -> Div {
+fn render_holdings_table(positions: &[Position]) -> gpui::Stateful<Div> {
     let mut table = div().flex().flex_col().gap_1();
 
     // Header
@@ -155,7 +155,7 @@ fn render_holdings_table(positions: &[Position]) -> Div {
         table = table.child(render_position_row(pos));
     }
 
-    table
+    table.id("holdings-scroll").overflow_y_scroll()
 }
 
 fn render_header_row() -> Div {
