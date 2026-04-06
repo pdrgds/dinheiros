@@ -941,13 +941,13 @@ fn import_ibkr_csv(
         let currency = fields[4].trim();
         let symbol = fields[5].trim();
         let datetime = fields[6].trim().trim_matches('"');
-        let quantity: f64 = fields[7].trim().parse().unwrap_or(0.0);
-        let trade_price: f64 = fields[8].trim().parse().unwrap_or(0.0);
-        let proceeds: f64 = fields[10].trim().parse().unwrap_or(0.0);
-        let commission: f64 = fields[11].trim().parse().unwrap_or(0.0);
+        let quantity: f64 = parse_ibkr_number(&fields[7]);
+        let trade_price: f64 = parse_ibkr_number(&fields[8]);
+        let proceeds: f64 = parse_ibkr_number(&fields[10]);
+        let commission: f64 = parse_ibkr_number(&fields[11]);
 
-        if quantity == 0.0 || symbol.is_empty() {
-            continue;
+        if quantity == 0.0 || symbol.is_empty() || symbol.contains('.') {
+            continue; // skip forex pairs like EUR.USD
         }
 
         // Date is "2024-10-09, 09:37:52" — take first 10 chars
@@ -980,7 +980,7 @@ fn import_ibkr_csv(
         let currency = fields[2].trim();
         let date_str = fields[3].trim();
         let description = fields[4].trim();
-        let amount: f64 = fields[5].trim().parse().unwrap_or(0.0);
+        let amount: f64 = parse_ibkr_number(&fields[5]);
 
         let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
             Ok(d) => d,
@@ -1007,7 +1007,7 @@ fn import_ibkr_csv(
                 continue;
             }
             if tf[3].trim() == date_str && tf[4].trim().starts_with(&format!("{}(", symbol)) {
-                tax_amount += tf[5].trim().parse::<f64>().unwrap_or(0.0);
+                tax_amount += parse_ibkr_number(&tf[5]);
                 let (_, origin) =
                     investimentos_core::parsers::ibkr_flex::parse_tax_description(tf[4].trim());
                 if !origin.is_empty() {
@@ -1040,6 +1040,12 @@ fn import_ibkr_csv(
         inc_new + inc_dup,
         inc_new,
     ))
+}
+
+/// Parse a number from IBKR CSV, stripping thousand-separator commas.
+/// Handles values like "1,000", "-3,595", "0.829780693".
+fn parse_ibkr_number(s: &str) -> f64 {
+    s.trim().replace(',', "").parse().unwrap_or(0.0)
 }
 
 /// Split a CSV line respecting quoted fields (handles commas inside quotes).
