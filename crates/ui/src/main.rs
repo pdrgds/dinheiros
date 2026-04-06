@@ -17,7 +17,7 @@ fn main() {
             std::fs::create_dir_all(parent).ok();
         }
 
-        let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
+        let bounds = Bounds::centered(None, size(px(1400.), px(700.)), cx);
 
         cx.open_window(
             WindowOptions {
