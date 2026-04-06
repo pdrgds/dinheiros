@@ -33,10 +33,11 @@ pub enum Tab {
     Positions,
     Income,
     History,
+    Insights,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Overview, Tab::Positions, Tab::Income, Tab::History];
+    pub const ALL: [Tab; 5] = [Tab::Overview, Tab::Positions, Tab::Income, Tab::History, Tab::Insights];
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -44,6 +45,7 @@ impl Tab {
             Tab::Positions => "Positions",
             Tab::Income => "Income",
             Tab::History => "History",
+            Tab::Insights => "Insights",
         }
     }
 }
@@ -456,6 +458,8 @@ impl AppRoot {
                 // Initial delay — let the app render first
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
+                let mut has_fetched_current = false;
+
                 loop {
                     let db = match Database::open(&db_path) {
                         Ok(db) => db,
@@ -464,6 +468,25 @@ impl AppRoot {
                             continue;
                         }
                     };
+
+                    // Fetch current prices once at startup before backfilling
+                    if !has_fetched_current {
+                        let mut s = status_writer.lock().unwrap();
+                        s.running = true;
+                        s.last_message = Some("Fetching current prices...".to_string());
+                        drop(s);
+
+                        match investimentos_core::reconcile::fetch_current_prices(&db).await {
+                            Ok(n) => {
+                                let mut s = status_writer.lock().unwrap();
+                                s.last_message = Some(format!("{} current prices fetched, backfilling...", n));
+                            }
+                            Err(e) => {
+                                eprintln!("[startup] current price fetch failed: {}", e);
+                            }
+                        }
+                        has_fetched_current = true;
+                    }
 
                     {
                         let mut s = status_writer.lock().unwrap();
@@ -860,6 +883,7 @@ impl AppRoot {
             AppMode::Tab(Tab::Positions) => views::positions::render_positions(&self.db, self.positions_sort, self.selected_position, cx),
             AppMode::Tab(Tab::Income) => views::income::render_income(&self.db),
             AppMode::Tab(Tab::History) => views::history::render_history(&self.db, self.history_range, self.history_split, cx),
+            AppMode::Tab(Tab::Insights) => views::insights::render_insights(&self.db),
             AppMode::Import => self.render_import_mode(cx),
             AppMode::ManualGold => self.render_gold_mode(cx),
             AppMode::Settings => self.render_settings_mode(cx),

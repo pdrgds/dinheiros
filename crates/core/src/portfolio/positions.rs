@@ -37,15 +37,22 @@ pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
 
         match tx.tx_type {
             TxType::Buy => {
-                entry.total_cost_orig += tx.total_value;
-                entry.total_cost_brl += tx.total_brl;
                 entry.net_qty += tx.quantity;
+                // Corporate actions (splits, CUSIP changes) have total_value=0.
+                // They adjust quantity but cost basis transfers from the old shares.
+                if tx.total_value > 0.001 {
+                    entry.total_cost_orig += tx.total_value;
+                    entry.total_cost_brl += tx.total_brl;
+                }
             }
             TxType::Sell | TxType::FractionAuction => {
                 if entry.net_qty > 0.0 {
-                    let fraction_sold = tx.quantity / entry.net_qty;
-                    entry.total_cost_orig -= entry.total_cost_orig * fraction_sold;
-                    entry.total_cost_brl -= entry.total_cost_brl * fraction_sold;
+                    // Only reduce cost basis for real sells, not $0 corporate actions
+                    if tx.total_value > 0.001 {
+                        let fraction_sold = tx.quantity / entry.net_qty;
+                        entry.total_cost_orig -= entry.total_cost_orig * fraction_sold;
+                        entry.total_cost_brl -= entry.total_cost_brl * fraction_sold;
+                    }
                     entry.net_qty -= tx.quantity;
                 }
             }

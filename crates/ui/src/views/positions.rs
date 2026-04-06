@@ -50,7 +50,7 @@ impl SortColumn {
             Self::AvgCost => "Avg Cost",
             Self::AvgCostBrl => "Cost BRL",
             Self::Price => "Price",
-            Self::ValueOrig => "Val orig",
+            Self::ValueOrig => "Value",
             Self::PlOrig => "P/L orig",
             Self::PlBrl => "P/L BRL",
             Self::PlPct => "P/L %",
@@ -300,6 +300,7 @@ fn render_position_row(
     let pnl_orig = (price - pos.avg_cost) * pos.quantity;
     let weight = pos.weight.unwrap_or(0.0);
     let is_selected = selected == Some(ix);
+    let ccy = currency_symbol(&pos.currency);
 
     let bg = if is_selected { theme::BG_SECONDARY } else { theme::BG_PRIMARY };
 
@@ -323,12 +324,12 @@ fn render_position_row(
         .child(cell(SortColumn::Type).text_color(asset_color(&pos.asset_type)).child(asset_label(&pos.asset_type)))
         .child(cell(SortColumn::Currency).text_color(theme::TEXT_SECONDARY).child(pos.currency.clone()))
         .child(cell(SortColumn::Qty).child(format_qty(pos.quantity)))
-        .child(cell(SortColumn::AvgCost).child(format_brl(pos.avg_cost)))
+        .child(cell(SortColumn::AvgCost).child(format!("{} {}", ccy, format_brl(pos.avg_cost))))
         .child(cell(SortColumn::AvgCostBrl).child(format!("R$ {}", format_brl(pos.avg_cost_brl))))
-        .child(cell(SortColumn::Price).child(format_brl(price)))
-        .child(cell(SortColumn::ValueOrig).child(format_brl(price * pos.quantity)))
-        .child(cell(SortColumn::PlOrig).text_color(pnl_color(pnl_orig)).child(format!("{:+}", format_brl(pnl_orig))))
-        .child(cell(SortColumn::PlBrl).text_color(pnl_color(pnl_brl)).child(format!("{:+}", format_brl(pnl_brl))))
+        .child(cell(SortColumn::Price).child(format!("{} {}", ccy, format_brl(price))))
+        .child(cell(SortColumn::ValueOrig).child(format!("{} {}", ccy, format_brl(price * pos.quantity))))
+        .child(cell(SortColumn::PlOrig).text_color(pnl_color(pnl_orig)).child(format!("{} {:+}", ccy, format_brl(pnl_orig))))
+        .child(cell(SortColumn::PlBrl).text_color(pnl_color(pnl_brl)).child(format!("R$ {:+}", format_brl(pnl_brl))))
         .child(cell(SortColumn::PlPct).text_color(pnl_color(pnl_pct)).child(format!("{:+.1}%", pnl_pct)))
         .child(cell(SortColumn::ValueBrl).child(format!("R$ {}", format_brl(value_brl))))
         .child(cell(SortColumn::Weight).child(format!("{:.1}%", weight)))
@@ -336,6 +337,18 @@ fn render_position_row(
 
 fn cell(col: SortColumn) -> Div {
     div().w(gpui::px(col.width())).overflow_hidden().whitespace_nowrap()
+}
+
+fn currency_symbol(code: &str) -> &'static str {
+    match code {
+        "BRL" => "R$",
+        "USD" => "$",
+        "EUR" => "\u{20AC}",
+        "GBP" => "\u{00A3}",
+        "CAD" => "C$",
+        "DKK" => "kr",
+        _ => "$",
+    }
 }
 
 fn format_qty(q: f64) -> String {

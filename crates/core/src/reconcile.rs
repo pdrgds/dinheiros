@@ -233,35 +233,25 @@ async fn backfill_crypto(
             Err(_) => continue,
         };
 
-        // CoinGecko free tier limits range to ~365 days — chunk if needed
-        let mut chunk_start = start;
-        while chunk_start < end {
-            let chunk_end = (chunk_start + Duration::days(300)).min(end);
-
-            match coingecko::fetch_btc_brl_history(chunk_start, chunk_end).await {
-                Ok(prices) => {
-                    for (date, price) in &prices {
-                        if queries::upsert_daily_price(db, &DailyPrice {
-                            symbol: symbol.clone(), date: *date, close_price: *price,
-                            currency: "BRL".to_string(), brl_rate: 1.0,
-                        }).is_ok() {
-                            prices_backfilled += 1;
-                        }
+        // Binance klines API handles any range with pagination, no limit
+        match coingecko::fetch_btc_brl_history(start, end).await {
+            Ok(prices) => {
+                for (date, price) in &prices {
+                    if queries::upsert_daily_price(db, &DailyPrice {
+                        symbol: symbol.clone(), date: *date, close_price: *price,
+                        currency: "BRL".to_string(), brl_rate: 1.0,
+                    }).is_ok() {
+                        prices_backfilled += 1;
                     }
-                }
-                Err(e) => {
-                    if is_rate_limited(&e) {
-                        return (prices_backfilled, symbols_failed, symbols_up_to_date, true);
-                    }
-                    symbols_failed += 1;
-                    eprintln!("[reconcile] crypto backfill failed for {} ({} to {}): {}", symbol, chunk_start, chunk_end, e);
-                    break;
                 }
             }
-
-            chunk_start = chunk_end + Duration::days(1);
-            // Brief pause between chunks to avoid rate limits
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            Err(e) => {
+                if is_rate_limited(&e) {
+                    return (prices_backfilled, symbols_failed, symbols_up_to_date, true);
+                }
+                symbols_failed += 1;
+                eprintln!("[reconcile] crypto backfill failed for {}: {}", symbol, e);
+            }
         }
     }
     (prices_backfilled, symbols_failed, symbols_up_to_date, false)

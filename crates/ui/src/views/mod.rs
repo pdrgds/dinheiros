@@ -1,6 +1,7 @@
 pub mod history;
 pub mod import;
 pub mod income;
+pub mod insights;
 pub mod manual;
 pub mod overview;
 pub mod positions;

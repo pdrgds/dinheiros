@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, AnyElement, Div, FontWeight, Rgba};
+use gpui::{div, prelude::*, px, AnyElement, Div, FontWeight, Rgba};
 
 use investimentos_core::db::Database;
 use investimentos_core::portfolio;
@@ -46,6 +46,10 @@ pub fn render_overview(db: &Database) -> AnyElement {
     let allocations = portfolio::compute_allocations(&positions);
     let total_value_brl: f64 = positions.iter().filter_map(|p| p.current_value_brl).sum();
 
+    // Cost basis of current holdings (not all-time invested)
+    let total_cost_brl: f64 = positions.iter().map(|p| p.avg_cost_brl * p.quantity).sum();
+    let total_pnl = total_value_brl - total_cost_brl;
+
     // Top N by value
     let mut top = positions.clone();
     top.sort_by(|a, b| {
@@ -68,8 +72,8 @@ pub fn render_overview(db: &Database) -> AnyElement {
         .overflow_y_scroll()
         .p_6()
         .gap_6()
-        // Total value
-        .child(render_total(total_value_brl))
+        // Total value + P/L
+        .child(render_total(total_value_brl, total_cost_brl, total_pnl))
         // Allocation chips
         .child(render_allocation_panel(&allocations))
         // Top holdings
@@ -90,7 +94,11 @@ pub fn render_overview(db: &Database) -> AnyElement {
 // Total portfolio value
 // ---------------------------------------------------------------------------
 
-fn render_total(total: f64) -> Div {
+fn render_total(total: f64, invested: f64, pnl: f64) -> Div {
+    let pnl_pct = if invested > 0.0 { pnl / invested * 100.0 } else { 0.0 };
+    let pnl_color = if pnl >= 0.0 { theme::GREEN } else { theme::RED };
+    let sign = if pnl >= 0.0 { "+" } else { "" };
+
     div()
         .flex()
         .flex_col()
@@ -103,9 +111,33 @@ fn render_total(total: f64) -> Div {
         )
         .child(
             div()
-                .text_2xl()
-                .font_weight(FontWeight::BOLD)
-                .child(format!("R$ {}", format_brl(total))),
+                .flex()
+                .flex_row()
+                .items_end()
+                .gap_4()
+                .child(
+                    div()
+                        .text_2xl()
+                        .font_weight(FontWeight::BOLD)
+                        .child(format!("R$ {}", format_brl(total))),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(pnl_color)
+                        .pb(px(2.0))
+                        .child(format!(
+                            "{}R$ {} ({}{:.1}%)",
+                            sign, format_brl(pnl.abs()), sign, pnl_pct
+                        )),
+                ),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme::TEXT_SECONDARY)
+                .child(format!("Invested: R$ {}", format_brl(invested))),
         )
 }
 
