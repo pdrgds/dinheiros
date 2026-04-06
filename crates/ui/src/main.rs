@@ -17,11 +17,11 @@ fn main() {
             std::fs::create_dir_all(parent).ok();
         }
 
-        let bounds = Bounds::maximized(None, cx);
+        let bounds = Bounds::centered(None, size(px(1050.), px(650.)), cx);
 
         cx.open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::Maximized(bounds)),
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Investimentos v2".into()),
                     ..Default::default()
