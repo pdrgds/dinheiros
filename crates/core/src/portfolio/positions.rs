@@ -22,10 +22,12 @@ struct PositionAccum {
 pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
     let transactions = queries::get_all_transactions(db)?;
 
-    let mut accum: HashMap<String, PositionAccum> = HashMap::new();
+    // Group by (symbol, currency) to handle same symbol traded in different currencies.
+    let mut accum: HashMap<(String, String), PositionAccum> = HashMap::new();
 
     for tx in &transactions {
-        let entry = accum.entry(tx.symbol.clone()).or_insert_with(|| PositionAccum {
+        let key = (tx.symbol.clone(), tx.currency.clone());
+        let entry = accum.entry(key).or_insert_with(|| PositionAccum {
             asset_type: tx.asset_type.clone(),
             currency: tx.currency.clone(),
             net_qty: 0.0,
@@ -58,7 +60,7 @@ pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
 
     let mut positions: Vec<Position> = Vec::new();
 
-    for (symbol, acc) in &accum {
+    for ((symbol, _currency), acc) in &accum {
         // Skip fully closed positions
         if acc.net_qty < 0.00001 {
             continue; // closed position or sells-only (no matching buys)

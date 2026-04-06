@@ -7,3 +7,11 @@ pub mod reconcile;
 pub mod types;
 
 pub use types::*;
+
+/// SHA256 hash a string and return hex-encoded result.
+pub fn hash_string(input: &str) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
+}

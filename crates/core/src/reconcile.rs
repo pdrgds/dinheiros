@@ -53,7 +53,7 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
             continue;
         }
 
-        let yahoo_sym = yahoo::to_yahoo_symbol(symbol, asset_type);
+        let yahoo_sym = yahoo::to_yahoo_symbol_with_db(symbol, asset_type, db);
 
         let price = match yahoo::fetch_current_price(&yahoo_sym).await {
             Ok(p) => p,
@@ -96,13 +96,13 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
     }
 
     // Handle BTC separately via CoinGecko (BRL-denominated)
+    // Only fetch once per symbol, not per (symbol, currency) pair.
     if has_crypto {
-        let btc_symbols: Vec<_> = symbols
-            .iter()
-            .filter(|(_, at, _)| at == "crypto")
-            .collect();
-
-        for (symbol, _asset_type, _currency) in btc_symbols {
+        let mut seen = std::collections::HashSet::new();
+        for (symbol, asset_type, _currency) in &symbols {
+            if asset_type != "crypto" || !seen.insert(symbol.clone()) {
+                continue;
+            }
             match coingecko::fetch_btc_brl_current().await {
                 Ok(price) => {
                     if let Err(e) = queries::upsert_daily_price(
@@ -115,19 +115,13 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
                             brl_rate: 1.0,
                         },
                     ) {
-                        eprintln!(
-                            "[reconcile] warning: failed to store crypto price for {}: {}",
-                            symbol, e
-                        );
+                        eprintln!("[reconcile] warning: failed to store crypto price for {}: {}", symbol, e);
                     } else {
                         count += 1;
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[reconcile] warning: failed to fetch BTC/BRL price: {}",
-                        e
-                    );
+                    eprintln!("[reconcile] warning: failed to fetch BTC/BRL price: {}", e);
                 }
             }
         }
@@ -209,7 +203,7 @@ pub async fn backfill_prices(db: &Database) -> Result<ReconcileResult, Box<dyn s
             }
         } else {
             // Use Yahoo Finance for stocks/bonds/gold
-            let yahoo_sym = yahoo::to_yahoo_symbol(symbol, asset_type);
+            let yahoo_sym = yahoo::to_yahoo_symbol_with_db(symbol, asset_type, db);
 
             let history = match yahoo::fetch_history(&yahoo_sym, start, today).await {
                 Ok(h) => h,

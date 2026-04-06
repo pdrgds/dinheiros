@@ -7,7 +7,12 @@ use investimentos_core::types::*;
 use crate::theme;
 use crate::views::format_brl;
 
-/// Color for a given asset type.
+const TOP_N: usize = 5;
+
+// ---------------------------------------------------------------------------
+// Colors
+// ---------------------------------------------------------------------------
+
 fn asset_color(at: &AssetType) -> Rgba {
     match at {
         AssetType::StockIntl => theme::ACCENT,
@@ -18,7 +23,6 @@ fn asset_color(at: &AssetType) -> Rgba {
     }
 }
 
-/// Human label for asset type.
 fn asset_label(at: &AssetType) -> &'static str {
     match at {
         AssetType::StockIntl => "Intl Stocks",
@@ -29,12 +33,8 @@ fn asset_label(at: &AssetType) -> &'static str {
     }
 }
 
-fn pnl_color(pct: f64) -> Rgba {
-    if pct >= 0.0 {
-        theme::GREEN
-    } else {
-        theme::RED
-    }
+fn pnl_color(v: f64) -> Rgba {
+    if v >= 0.0 { theme::GREEN } else { theme::RED }
 }
 
 // ---------------------------------------------------------------------------
@@ -46,21 +46,48 @@ pub fn render_overview(db: &Database) -> AnyElement {
     let allocations = portfolio::compute_allocations(&positions);
     let total_value_brl: f64 = positions.iter().filter_map(|p| p.current_value_brl).sum();
 
+    // Top N by value
+    let mut top = positions.clone();
+    top.sort_by(|a, b| {
+        b.current_value_brl
+            .unwrap_or(0.0)
+            .partial_cmp(&a.current_value_brl.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    top.truncate(TOP_N);
+
+    // Compute "rest" weight
+    let top_weight: f64 = top.iter().filter_map(|p| p.weight).sum();
+    let rest_count = positions.len().saturating_sub(TOP_N);
+
     div()
+        .id("overview-scroll")
         .flex()
         .flex_col()
-        .gap_6()
-        .p_6()
-        .w_full()
         .flex_1()
+        .overflow_y_scroll()
+        .p_6()
+        .gap_6()
+        // Total value
         .child(render_total(total_value_brl))
+        // Allocation chips
         .child(render_allocation_panel(&allocations))
-        .child(render_holdings_table(&positions))
+        // Top holdings
+        .child(render_top_holdings(&top, rest_count, top_weight))
+        // Placeholder for charts
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .gap_6()
+                .child(render_chart_placeholder("Allocation Chart"))
+                .child(render_chart_placeholder("Portfolio Value (90d)")),
+        )
         .into_any_element()
 }
 
 // ---------------------------------------------------------------------------
-// Total portfolio value header
+// Total portfolio value
 // ---------------------------------------------------------------------------
 
 fn render_total(total: f64) -> Div {
@@ -87,7 +114,7 @@ fn render_total(total: f64) -> Div {
 // ---------------------------------------------------------------------------
 
 fn render_allocation_panel(allocations: &[Allocation]) -> Div {
-    let mut panel = div().flex().flex_col().gap_4();
+    let mut panel = div().flex().flex_col().gap_2();
 
     panel = panel.child(
         div()
@@ -97,129 +124,189 @@ fn render_allocation_panel(allocations: &[Allocation]) -> Div {
             .child("Allocation"),
     );
 
-    let mut row = div().flex().flex_row().gap_4().flex_wrap();
+    let mut row = div().flex().flex_row().gap_3().flex_wrap();
     for alloc in allocations {
-        row = row.child(render_allocation_chip(alloc));
+        let color = asset_color(&alloc.asset_type);
+        row = row.child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .rounded_md()
+                .bg(theme::BG_SECONDARY)
+                .child(
+                    div()
+                        .w(gpui::px(10.0))
+                        .h(gpui::px(10.0))
+                        .rounded_md()
+                        .bg(color),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .child(format!(
+                            "{} — {:.1}%",
+                            asset_label(&alloc.asset_type),
+                            alloc.weight
+                        )),
+                ),
+        );
     }
     panel.child(row)
 }
 
-fn render_allocation_chip(alloc: &Allocation) -> Div {
-    let color = asset_color(&alloc.asset_type);
-    div()
+// ---------------------------------------------------------------------------
+// Top holdings summary
+// ---------------------------------------------------------------------------
+
+fn render_top_holdings(top: &[Position], rest_count: usize, top_weight: f64) -> Div {
+    let mut panel = div()
         .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .px_3()
-        .py_1()
-        .rounded_md()
+        .flex_col()
+        .gap_1()
+        .p_4()
+        .rounded_lg()
         .bg(theme::BG_SECONDARY)
-        .child(
-            div()
-                .w(gpui::px(10.0))
-                .h(gpui::px(10.0))
-                .rounded_md()
-                .bg(color),
-        )
-        .child(
-            div()
-                .text_sm()
-                .child(format!(
-                    "{} — {:.1}%",
-                    asset_label(&alloc.asset_type),
-                    alloc.weight
-                )),
-        )
-}
+        .border_1()
+        .border_color(theme::BORDER);
 
-// ---------------------------------------------------------------------------
-// Holdings table
-// ---------------------------------------------------------------------------
-
-fn render_holdings_table(positions: &[Position]) -> gpui::Stateful<Div> {
-    let mut table = div().flex().flex_col().gap_1();
-
-    // Header
-    table = table.child(
+    panel = panel.child(
         div()
             .text_sm()
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::TEXT_SECONDARY)
-            .child("Top Holdings"),
+            .pb_1()
+            .child(format!("Top {} Holdings", TOP_N)),
     );
 
-    table = table.child(render_header_row());
+    // Header
+    panel = panel.child(
+        div()
+            .flex()
+            .flex_row()
+            .py_1()
+            .border_b_1()
+            .border_color(theme::BORDER)
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::TEXT_SECONDARY)
+            .child(div().flex_1().child("Symbol"))
+            .child(div().w(gpui::px(90.0)).child("Value (BRL)"))
+            .child(div().w(gpui::px(70.0)).child("P/L %"))
+            .child(div().w(gpui::px(55.0)).child("Wt %")),
+    );
 
-    for pos in positions {
-        table = table.child(render_position_row(pos));
+    for pos in top {
+        let pnl_pct = pos.pnl_pct.unwrap_or(0.0);
+        let value_brl = pos.current_value_brl.unwrap_or(0.0);
+        let weight = pos.weight.unwrap_or(0.0);
+
+        panel = panel.child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .py_1()
+                .border_b_1()
+                .border_color(theme::BORDER)
+                .text_xs()
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_row()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(pos.symbol.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_color(asset_color(&pos.asset_type))
+                                .child(asset_label(&pos.asset_type)),
+                        ),
+                )
+                .child(
+                    div()
+                        .w(gpui::px(90.0))
+                        .child(format!("R$ {}", format_brl(value_brl))),
+                )
+                .child(
+                    div()
+                        .w(gpui::px(70.0))
+                        .text_color(pnl_color(pnl_pct))
+                        .child(format!("{:+.1}%", pnl_pct)),
+                )
+                .child(
+                    div()
+                        .w(gpui::px(55.0))
+                        .child(format!("{:.1}%", weight)),
+                ),
+        );
     }
 
-    table.id("holdings-scroll").overflow_y_scroll()
+    // "And X others" row
+    if rest_count > 0 {
+        let rest_weight = 100.0 - top_weight;
+        panel = panel.child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .py_1()
+                .text_xs()
+                .text_color(theme::TEXT_SECONDARY)
+                .child(
+                    div()
+                        .flex_1()
+                        .child(format!("+ {} others", rest_count)),
+                )
+                .child(div().w(gpui::px(90.0)))
+                .child(div().w(gpui::px(70.0)))
+                .child(
+                    div()
+                        .w(gpui::px(55.0))
+                        .child(format!("{:.1}%", rest_weight)),
+                ),
+        );
+    }
+
+    panel
 }
 
-fn render_header_row() -> Div {
-    div()
-        .flex()
-        .flex_row()
-        .py_1()
-        .border_b_1()
-        .border_color(theme::BORDER)
-        .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::TEXT_SECONDARY)
-        .child(div().w(gpui::px(90.0)).child("Symbol"))
-        .child(div().w(gpui::px(80.0)).child("Type"))
-        .child(div().w(gpui::px(120.0)).child("Value (orig)"))
-        .child(div().w(gpui::px(130.0)).child("Value (BRL)"))
-        .child(div().w(gpui::px(80.0)).child("P/L %"))
-        .child(div().w(gpui::px(70.0)).child("Weight"))
-}
+// ---------------------------------------------------------------------------
+// Chart placeholders
+// ---------------------------------------------------------------------------
 
-fn render_position_row(pos: &Position) -> Div {
-    let pnl_pct = pos.pnl_pct.unwrap_or(0.0);
-    let value_brl = pos.current_value_brl.unwrap_or(0.0);
-    let value_orig = pos.current_price.map(|p| p * pos.quantity).unwrap_or(0.0);
-    let weight = pos.weight.unwrap_or(0.0);
-
+fn render_chart_placeholder(title: &str) -> Div {
     div()
+        .flex_1()
         .flex()
-        .flex_row()
-        .py_1()
-        .border_b_1()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .h(gpui::px(180.0))
+        .rounded_lg()
+        .bg(theme::BG_SECONDARY)
+        .border_1()
         .border_color(theme::BORDER)
-        .text_xs()
         .child(
             div()
-                .w(gpui::px(90.0))
-                .font_weight(FontWeight::MEDIUM)
-                .child(pos.symbol.clone()),
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::TEXT_SECONDARY)
+                .child(title.to_string()),
         )
         .child(
             div()
-                .w(gpui::px(80.0))
-                .text_color(asset_color(&pos.asset_type))
-                .child(asset_label(&pos.asset_type)),
-        )
-        .child(
-            div()
-                .w(gpui::px(120.0))
-                .child(format!("{} {}", pos.currency, format_brl(value_orig))),
-        )
-        .child(
-            div()
-                .w(gpui::px(130.0))
-                .child(format!("R$ {}", format_brl(value_brl))),
-        )
-        .child(
-            div()
-                .w(gpui::px(80.0))
-                .text_color(pnl_color(pnl_pct))
-                .child(format!("{:+.2}%", pnl_pct)),
-        )
-        .child(
-            div()
-                .w(gpui::px(70.0))
-                .child(format!("{:.1}%", weight)),
+                .text_xs()
+                .text_color(theme::TEXT_SECONDARY)
+                .pt_2()
+                .child("Coming soon"),
         )
 }

@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/ui"]
+
+[patch.crates-io]
+gpui-ce = { path = "../gpui-ce" }

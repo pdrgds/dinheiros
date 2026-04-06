@@ -59,24 +59,38 @@ pub struct AppRoot {
     status_message: Option<String>,
     syncing: bool,
     // Settings editing state
-    settings_fields: [String; 3],
+    settings_fields: [String; 1],
     settings_active_field: Option<usize>,
     settings_focus: FocusHandle,
+    // Gold form state
+    gold_fields: [String; 3], // 0=date, 1=quantity(g), 2=unit_price(BRL/g)
+    gold_active_field: Option<usize>,
+    gold_focus: FocusHandle,
+    // Positions state
+    pub positions_sort: views::positions::SortState,
+    pub selected_position: Option<usize>,
 }
 
 impl AppRoot {
     pub fn new(db_path: PathBuf, cx: &mut Context<Self>) -> Self {
         let db = Database::open(&db_path).expect("Failed to open database");
-        let focus = cx.focus_handle();
+        let settings_focus = cx.focus_handle();
+        let gold_focus = cx.focus_handle();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         Self {
             mode: AppMode::Tab(Tab::Overview),
             last_tab: Tab::Overview,
             db,
             status_message: None,
             syncing: false,
-            settings_fields: [String::new(), String::new(), String::new()],
+            settings_fields: [String::new()],
             settings_active_field: None,
-            settings_focus: focus,
+            settings_focus,
+            gold_fields: [today, String::new(), String::new()],
+            gold_active_field: None,
+            gold_focus,
+            positions_sort: views::positions::SortState::default(),
+            selected_position: None,
         }
     }
 
@@ -101,29 +115,22 @@ impl AppRoot {
 
     fn load_settings_from_db(&mut self) {
         use investimentos_core::db::queries;
-        let keys = ["ibkr_flex_token", "ibkr_flex_query_id", "coingecko_api_key"];
-        for (i, key) in keys.iter().enumerate() {
-            self.settings_fields[i] = queries::get_config(&self.db, key)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-        }
+        self.settings_fields[0] = queries::get_config(&self.db, "coingecko_api_key")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         self.settings_active_field = None;
     }
 
     fn save_settings_to_db(&mut self, cx: &mut Context<Self>) {
         use investimentos_core::db::queries;
-        let keys = ["ibkr_flex_token", "ibkr_flex_query_id", "coingecko_api_key"];
-        let mut errors = Vec::new();
-        for (i, key) in keys.iter().enumerate() {
-            if let Err(e) = queries::set_config(&self.db, key, &self.settings_fields[i]) {
-                errors.push(format!("{}: {}", key, e));
+        match queries::set_config(&self.db, "coingecko_api_key", &self.settings_fields[0]) {
+            Ok(_) => {
+                self.status_message = Some("Settings saved.".to_string());
             }
-        }
-        if errors.is_empty() {
-            self.status_message = Some("Settings saved.".to_string());
-        } else {
-            self.status_message = Some(format!("Save errors: {}", errors.join(", ")));
+            Err(e) => {
+                self.status_message = Some(format!("Save error: {}", e));
+            }
         }
         self.settings_active_field = None;
         cx.notify();
@@ -174,18 +181,8 @@ impl AppRoot {
                 self.settings_active_field = None;
                 cx.notify();
             }
-            "tab" => {
-                // Move to next field
-                self.settings_active_field = Some((idx + 1) % 3);
-                cx.notify();
-            }
-            "enter" => {
-                // Move to next field or deselect on last
-                if idx < 2 {
-                    self.settings_active_field = Some(idx + 1);
-                } else {
-                    self.settings_active_field = None;
-                }
+            "tab" | "enter" => {
+                self.settings_active_field = None;
                 cx.notify();
             }
             _ => {
@@ -196,6 +193,130 @@ impl AppRoot {
                 }
             }
         }
+    }
+
+    fn handle_gold_key(
+        &mut self,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(idx) = self.gold_active_field else {
+            return;
+        };
+        let keystroke = &event.keystroke;
+
+        if keystroke.modifiers.platform && keystroke.key == "v" {
+            if let Some(item) = cx.read_from_clipboard() {
+                if let Some(text) = item.text() {
+                    let clean: String = text.lines().next().unwrap_or("").trim().to_string();
+                    self.gold_fields[idx] = clean;
+                    cx.notify();
+                }
+            }
+            return;
+        }
+        if keystroke.modifiers.platform || keystroke.modifiers.control {
+            return;
+        }
+
+        match keystroke.key.as_str() {
+            "backspace" => {
+                self.gold_fields[idx].pop();
+                cx.notify();
+            }
+            "escape" => {
+                self.gold_active_field = None;
+                cx.notify();
+            }
+            "tab" | "enter" => {
+                if idx < 2 {
+                    self.gold_active_field = Some(idx + 1);
+                } else {
+                    self.gold_active_field = None;
+                }
+                cx.notify();
+            }
+            _ => {
+                if let Some(ref ch) = keystroke.key_char {
+                    self.gold_fields[idx].push_str(ch);
+                    cx.notify();
+                }
+            }
+        }
+    }
+
+    fn save_gold(&mut self, cx: &mut Context<Self>) {
+        let date_str = self.gold_fields[0].trim();
+        let qty_str = self.gold_fields[1].trim();
+        let price_str = self.gold_fields[2].trim();
+
+        let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => {
+                self.status_message = Some("Invalid date format (use YYYY-MM-DD)".to_string());
+                cx.notify();
+                return;
+            }
+        };
+        let quantity: f64 = match qty_str.replace(',', ".").parse() {
+            Ok(q) if q > 0.0 => q,
+            _ => {
+                self.status_message = Some("Invalid quantity".to_string());
+                cx.notify();
+                return;
+            }
+        };
+        let unit_price: f64 = match price_str.replace(',', ".").parse() {
+            Ok(p) if p > 0.0 => p,
+            _ => {
+                self.status_message = Some("Invalid unit price".to_string());
+                cx.notify();
+                return;
+            }
+        };
+
+        let total = quantity * unit_price;
+        let import_hash = investimentos_core::hash_string(
+            &format!("manual:gold:{}:{}:{}", date, quantity, unit_price),
+        );
+
+        let tx = investimentos_core::Transaction {
+            id: None,
+            source: investimentos_core::Source::Manual,
+            asset_type: investimentos_core::AssetType::Gold,
+            symbol: "GOLD".to_string(),
+            tx_type: investimentos_core::TxType::Buy,
+            date,
+            quantity,
+            unit_price: Some(unit_price),
+            currency: "BRL".to_string(),
+            total_value: total,
+            brl_rate: 1.0,
+            total_brl: total,
+            commission: None,
+            fee_brl: None,
+            notes: Some("manual gold entry".to_string()),
+            import_hash,
+        };
+
+        match investimentos_core::db::queries::insert_transaction(&self.db, &tx) {
+            Ok(true) => {
+                self.status_message =
+                    Some(format!("Gold added: {:.4}g at R$ {:.2}/g = R$ {:.2}", quantity, unit_price, total));
+                // Reset qty and price fields, keep date
+                self.gold_fields[1].clear();
+                self.gold_fields[2].clear();
+                self.gold_active_field = None;
+            }
+            Ok(false) => {
+                self.status_message = Some("Duplicate entry (already exists)".to_string());
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Error: {}", e));
+            }
+        }
+        cx.notify();
     }
 
     fn go_back(&mut self, cx: &mut Context<Self>) {
@@ -326,73 +447,13 @@ impl AppRoot {
 
                 let mut parts = Vec::new();
 
-                // Step 1: Try IBKR Flex fetch if configured
-                let token = investimentos_core::db::queries::get_config(&db, "ibkr_flex_token")
-                    .ok().flatten().unwrap_or_default();
-                let query_id = investimentos_core::db::queries::get_config(&db, "ibkr_flex_query_id")
-                    .ok().flatten().unwrap_or_default();
-
-                if !token.is_empty() && !query_id.is_empty() {
-                    match investimentos_core::api::ibkr_flex::fetch_flex_statement(&token, &query_id).await {
-                        Ok(xml) => {
-                            // Debug: dump raw XML for inspection
-                            let _ = std::fs::write("/tmp/ibkr_flex_debug.xml", &xml);
-
-                            match investimentos_core::parsers::ibkr_flex::parse_flex_xml(&xml) {
-                                Ok(result) => {
-                                    let mut tx_new = 0u32;
-                                    let mut inc_new = 0u32;
-
-                                    for tx in &result.transactions {
-                                        match investimentos_core::db::queries::insert_transaction(&db, tx) {
-                                            Ok(true) => tx_new += 1,
-                                            Ok(false) => {} // duplicate, already exists
-                                            Err(e) => {
-                                                parts.push(format!("IBKR tx insert err: {e}"));
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    for inc in &result.income {
-                                        match investimentos_core::db::queries::insert_income(&db, inc) {
-                                            Ok(true) => inc_new += 1,
-                                            Ok(false) => {} // duplicate
-                                            Err(e) => {
-                                                parts.push(format!("IBKR income insert err: {e}"));
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    // Store daily prices from open positions
-                                    for price in &result.daily_prices {
-                                        let _ = investimentos_core::db::queries::upsert_daily_price(&db, price);
-                                    }
-
-                                    parts.push(format!(
-                                        "IBKR: {} trades ({} new), {} income ({} new), {} positions",
-                                        result.transactions.len(),
-                                        tx_new,
-                                        result.income.len(),
-                                        inc_new,
-                                        result.positions_imported,
-                                    ));
-                                }
-                                Err(e) => parts.push(format!("IBKR parse: {e}")),
-                            }
-                        }
-                        Err(e) => parts.push(format!("IBKR: {e}")),
-                    }
-                }
-
-                // Step 2: Fetch current prices
+                // Fetch current prices
                 match investimentos_core::reconcile::fetch_current_prices(&db).await {
                     Ok(n) => parts.push(format!("{n} prices fetched")),
                     Err(e) => parts.push(format!("Price fetch: {e}")),
                 }
 
-                // Step 3: Backfill historical prices
+                // Backfill historical prices
                 match investimentos_core::reconcile::backfill_prices(&db).await {
                     Ok(r) => {
                         if r.prices_backfilled > 0 {
@@ -421,7 +482,7 @@ impl AppRoot {
                     });
                     break;
                 }
-                gpui::Timer::after(std::time::Duration::from_millis(200)).await;
+                cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
             }
         }).detach();
     }
@@ -597,17 +658,14 @@ impl AppRoot {
     }
 
     // ----- content area -----
-    fn render_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         match self.mode {
             AppMode::Tab(Tab::Overview) => views::overview::render_overview(&self.db),
-            AppMode::Tab(Tab::Positions) => views::positions::render_positions(&self.db),
+            AppMode::Tab(Tab::Positions) => views::positions::render_positions(&self.db, self.positions_sort, self.selected_position, cx),
             AppMode::Tab(Tab::Income) => views::income::render_income(&self.db),
             AppMode::Tab(Tab::History) => views::history::render_history(&self.db),
             AppMode::Import => self.render_import_mode(cx),
-            AppMode::ManualGold => self.render_mode_with_back(
-                views::manual::render_manual_gold(),
-                cx,
-            ),
+            AppMode::ManualGold => self.render_gold_mode(cx),
             AppMode::Settings => self.render_settings_mode(cx),
         }
     }
@@ -707,7 +765,7 @@ impl AppRoot {
 
     // ----- Settings mode -----
     fn render_settings_mode(&self, cx: &mut Context<Self>) -> AnyElement {
-        let labels = ["IBKR Flex Token", "IBKR Flex Query ID", "CoinGecko API Key"];
+        let labels = ["CoinGecko API Key"];
 
         let mut content = div()
             .id("settings-panel")
@@ -867,7 +925,7 @@ impl AppRoot {
                     .min_h(gpui::px(28.0))
                     .on_click(cx.listener(move |this, _ev: &ClickEvent, window, cx| {
                         this.settings_active_field = Some(index);
-                        this.settings_focus.focus(window);
+                        this.settings_focus.focus(window, cx);
                         cx.notify();
                     }))
                     .child(if is_active && display_value.is_empty() {
@@ -875,6 +933,154 @@ impl AppRoot {
                         "\u{258F}".to_string() // thin cursor char
                     } else if is_active {
                         format!("{}\u{258F}", display_value)
+                    } else {
+                        display_value
+                    }),
+            )
+    }
+
+    // ----- Gold entry mode -----
+    fn render_gold_mode(&self, cx: &mut Context<Self>) -> AnyElement {
+        let labels = ["Date (YYYY-MM-DD)", "Quantity (grams)", "Unit Price (BRL/g)"];
+
+        let mut content = div()
+            .id("gold-panel")
+            .track_focus(&self.gold_focus)
+            .flex()
+            .flex_col()
+            .gap_6()
+            .p_6()
+            .w_full()
+            .flex_1()
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                this.handle_gold_key(ev, window, cx);
+            }));
+
+        content = content.child(
+            div()
+                .text_2xl()
+                .font_weight(FontWeight::BOLD)
+                .child("Add Gold Purchase"),
+        );
+
+        let mut panel = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .rounded_lg()
+            .bg(theme::BG_SECONDARY)
+            .border_1()
+            .border_color(theme::BORDER);
+
+        for (i, label) in labels.iter().enumerate() {
+            let value = self.gold_fields[i].clone();
+            let is_active = self.gold_active_field == Some(i);
+            panel = panel.child(self.render_gold_field(i, label, &value, is_active, cx));
+        }
+
+        content = content.child(panel);
+
+        // Save button
+        content = content.child(
+            div().flex().flex_row().gap_2().child(
+                div()
+                    .id("save-gold-btn")
+                    .px_4()
+                    .py_2()
+                    .rounded_md()
+                    .bg(theme::YELLOW)
+                    .text_color(rgb(0x000000))
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .cursor_pointer()
+                    .hover(|style| style.opacity(0.85))
+                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                        this.save_gold(cx);
+                    }))
+                    .child("Add Gold"),
+            ),
+        );
+
+        content = content.child(
+            div()
+                .text_sm()
+                .text_color(theme::TEXT_SECONDARY)
+                .child("Click a field to edit. Tab/Enter to move to next field."),
+        );
+
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .flex_1()
+            .child(content)
+            .child(self.render_back_bar(cx))
+            .into_any_element()
+    }
+
+    fn render_gold_field(
+        &self,
+        index: usize,
+        label: &str,
+        value: &str,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let display_value = if value.is_empty() && !is_active {
+            "(empty)".to_string()
+        } else {
+            value.to_string()
+        };
+
+        let border_col = if is_active { theme::YELLOW } else { theme::BORDER };
+        let field_bg = if is_active { rgb(0x0d0d1a) } else { theme::BG_PRIMARY };
+        let text_col = if value.is_empty() && !is_active {
+            theme::TEXT_SECONDARY
+        } else {
+            theme::TEXT_PRIMARY
+        };
+
+        let id = SharedString::from(format!("gold-field-{}", index));
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_4()
+            .py_1()
+            .border_b_1()
+            .border_color(theme::BORDER)
+            .child(
+                div()
+                    .w(gpui::px(160.0))
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(label.to_string()),
+            )
+            .child(
+                div()
+                    .id(id)
+                    .flex_1()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .bg(field_bg)
+                    .border_1()
+                    .border_color(border_col)
+                    .text_sm()
+                    .text_color(text_col)
+                    .cursor_pointer()
+                    .min_h(gpui::px(28.0))
+                    .on_click(cx.listener(move |this, _ev: &ClickEvent, window, cx| {
+                        this.gold_active_field = Some(index);
+                        this.gold_focus.focus(window, cx);
+                        cx.notify();
+                    }))
+                    .child(if is_active && display_value == "(empty)" {
+                        "\u{258F}".to_string()
+                    } else if is_active {
+                        format!("{}\u{258F}", value)
                     } else {
                         display_value
                     }),
@@ -915,7 +1121,28 @@ fn action_button(
         .child(label)
 }
 
-/// Parse IBKR CSV activity statement and insert trades + dividends into DB.
+/// Intermediate struct for a parsed but not-yet-inserted IBKR trade.
+struct ParsedTrade {
+    symbol: String,
+    currency: String,
+    date: chrono::NaiveDate,
+    quantity: f64,
+    trade_price: f64,
+    proceeds: f64,
+    commission: f64,
+}
+
+/// Intermediate struct for a parsed but not-yet-inserted IBKR dividend.
+struct ParsedDividend {
+    symbol: String,
+    currency: String,
+    date: chrono::NaiveDate,
+    gross_amount: f64,
+    tax_amount: f64,
+    tax_origin: String,
+}
+
+/// Parse IBKR CSV activity statement, fetch BCB PTAX rates, and insert into DB.
 fn import_ibkr_csv(
     db: &Database,
     path: &std::path::Path,
@@ -923,12 +1150,10 @@ fn import_ibkr_csv(
     let content = std::fs::read_to_string(path)?;
     let filename = path.file_name().unwrap_or_default().to_string_lossy();
 
-    let mut tx_new = 0u32;
-    let mut tx_dup = 0u32;
-    let mut inc_new = 0u32;
-    let mut inc_dup = 0u32;
+    // Phase 1: Parse CSV into intermediate structs
+    let mut trades = Vec::new();
+    let mut dividends = Vec::new();
 
-    // Parse Trades section
     for line in content.lines() {
         if !line.starts_with("Trades,Data,Order,") {
             continue;
@@ -938,8 +1163,8 @@ fn import_ibkr_csv(
             continue;
         }
 
-        let currency = fields[4].trim();
-        let symbol = fields[5].trim();
+        let currency = fields[4].trim().to_string();
+        let symbol = fields[5].trim().to_string();
         let datetime = fields[6].trim().trim_matches('"');
         let quantity: f64 = parse_ibkr_number(&fields[7]);
         let trade_price: f64 = parse_ibkr_number(&fields[8]);
@@ -947,27 +1172,20 @@ fn import_ibkr_csv(
         let commission: f64 = parse_ibkr_number(&fields[11]);
 
         if quantity == 0.0 || symbol.is_empty() || symbol.contains('.') {
-            continue; // skip forex pairs like EUR.USD
+            continue;
         }
 
-        // Date is "2024-10-09, 09:37:52" — take first 10 chars
         let date_str = &datetime[..datetime.len().min(10)];
         let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
             Ok(d) => d,
             Err(_) => continue,
         };
 
-        let tx = investimentos_core::parsers::ibkr_flex::trade_to_transaction(
-            symbol, currency, date, quantity, trade_price, proceeds, commission, 1.0,
-        );
-        match investimentos_core::db::queries::insert_transaction(db, &tx) {
-            Ok(true) => tx_new += 1,
-            Ok(false) => tx_dup += 1,
-            Err(_) => {}
-        }
+        trades.push(ParsedTrade {
+            symbol, currency, date, quantity, trade_price, proceeds, commission,
+        });
     }
 
-    // Parse Dividends section
     for line in content.lines() {
         if !line.starts_with("Dividends,Data,") || line.starts_with("Dividends,Data,Total") {
             continue;
@@ -977,7 +1195,7 @@ fn import_ibkr_csv(
             continue;
         }
 
-        let currency = fields[2].trim();
+        let currency = fields[2].trim().to_string();
         let date_str = fields[3].trim();
         let description = fields[4].trim();
         let amount: f64 = parse_ibkr_number(&fields[5]);
@@ -993,7 +1211,6 @@ fn import_ibkr_csv(
             continue;
         }
 
-        // Find matching withholding tax
         let mut tax_amount = 0.0f64;
         let mut tax_origin = String::new();
         for tax_line in content.lines() {
@@ -1016,14 +1233,171 @@ fn import_ibkr_csv(
             }
         }
 
-        let inc = investimentos_core::parsers::ibkr_flex::dividend_to_income(
-            &symbol,
+        dividends.push(ParsedDividend {
+            symbol, currency, date, gross_amount: amount, tax_amount, tax_origin,
+        });
+    }
+
+    // Parse Corporate Actions section (splits, mergers, delistings, symbol changes)
+    for line in content.lines() {
+        if !line.starts_with("Corporate Actions,Data,")
+            || line.starts_with("Corporate Actions,Data,Total")
+        {
+            continue;
+        }
+        let fields = split_csv_line(line);
+        // Fields: 0=section, 1="Data", 2=asset_category, 3=currency, 4=report_date,
+        //         5=date_time, 6=description, 7=quantity, 8=proceeds, 9=value, 10=realized_pnl
+        if fields.len() < 8 {
+            continue;
+        }
+
+        let currency = fields[3].trim().to_string();
+        let date_str = fields[4].trim();
+        let description = fields[6].trim();
+        let quantity: f64 = parse_ibkr_number(&fields[7]);
+        let proceeds: f64 = if fields.len() > 8 {
+            parse_ibkr_number(&fields[8])
+        } else {
+            0.0
+        };
+
+        if quantity == 0.0 {
+            continue;
+        }
+
+        let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        // Extract the target symbol from description.
+        // Format: "SYMBOL(ISIN) Action... (NEW_SYMBOL, FULL NAME, NEW_ISIN)"
+        // For lines with ".OLD" in the parenthetical, the symbol is being removed.
+        // For lines without ".OLD", the symbol is being added.
+        // We need the symbol from the last parenthetical group.
+        let symbol = if let Some(last_paren_start) = description.rfind('(') {
+            let inner = &description[last_paren_start + 1..];
+            if let Some(comma_pos) = inner.find(',') {
+                let sym = inner[..comma_pos].trim();
+                // Skip .OLD entries — they remove shares from the old symbol
+                if sym.ends_with(".OLD") {
+                    sym.trim_end_matches(".OLD").to_uppercase()
+                } else {
+                    sym.to_uppercase()
+                }
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+
+        if symbol.is_empty() {
+            continue;
+        }
+
+        // For mergers/acquisitions with proceeds, use proceeds as total value.
+        // For splits, proceeds is 0 — quantity adjustment only.
+        let unit_price = if quantity.abs() > 0.0001 {
+            proceeds.abs() / quantity.abs()
+        } else {
+            0.0
+        };
+
+        trades.push(ParsedTrade {
+            symbol,
             currency,
             date,
-            amount,
-            tax_amount,
-            &tax_origin,
-            1.0,
+            quantity,
+            trade_price: unit_price,
+            proceeds: proceeds.abs(),
+            commission: 0.0,
+        });
+    }
+
+    // Parse Financial Instrument Information to get exchange mappings
+    for line in content.lines() {
+        if !line.starts_with("Financial Instrument Information,Data,") {
+            continue;
+        }
+        let fields = split_csv_line(line);
+        // Fields: 0=section, 1="Data", 2=asset_category, 3=symbol, 4=name, 5=con_id,
+        //         6=isin, 7=listing_exchange_symbol, 8=exchange, 9=multiplier, 10=type
+        if fields.len() < 9 {
+            continue;
+        }
+        let symbol = fields[3].trim();
+        let exchange = fields[8].trim();
+        if !symbol.is_empty() && !exchange.is_empty() {
+            let key = format!("exchange:{}", symbol);
+            let _ = investimentos_core::db::queries::set_config(db, &key, exchange);
+        }
+    }
+
+    // Phase 2: Collect unique (currency, date) pairs and fetch PTAX rates
+    let mut rate_keys: std::collections::HashSet<(String, chrono::NaiveDate)> =
+        std::collections::HashSet::new();
+    for t in &trades {
+        if t.currency != "BRL" {
+            rate_keys.insert((t.currency.clone(), t.date));
+        }
+    }
+    for d in &dividends {
+        if d.currency != "BRL" {
+            rate_keys.insert((d.currency.clone(), d.date));
+        }
+    }
+
+    let rates = fetch_ptax_rates_blocking(&rate_keys);
+
+    // Phase 3: Create transactions/income with real BRL rates and insert
+    let mut tx_new = 0u32;
+    let mut tx_dup = 0u32;
+    let mut inc_new = 0u32;
+    let mut inc_dup = 0u32;
+    let mut rate_misses = 0u32;
+
+    for t in &trades {
+        let brl_rate = if t.currency == "BRL" {
+            1.0
+        } else {
+            match rates.get(&(t.currency.clone(), t.date)) {
+                Some(&r) => r,
+                None => {
+                    rate_misses += 1;
+                    continue;
+                }
+            }
+        };
+
+        let tx = investimentos_core::parsers::ibkr_flex::trade_to_transaction(
+            &t.symbol, &t.currency, t.date, t.quantity, t.trade_price,
+            t.proceeds, t.commission, brl_rate,
+        );
+        match investimentos_core::db::queries::insert_transaction(db, &tx) {
+            Ok(true) => tx_new += 1,
+            Ok(false) => tx_dup += 1,
+            Err(_) => {}
+        }
+    }
+
+    for d in &dividends {
+        let brl_rate = if d.currency == "BRL" {
+            1.0
+        } else {
+            match rates.get(&(d.currency.clone(), d.date)) {
+                Some(&r) => r,
+                None => {
+                    rate_misses += 1;
+                    continue;
+                }
+            }
+        };
+
+        let inc = investimentos_core::parsers::ibkr_flex::dividend_to_income(
+            &d.symbol, &d.currency, d.date, d.gross_amount,
+            d.tax_amount, &d.tax_origin, brl_rate,
         );
         match investimentos_core::db::queries::insert_income(db, &inc) {
             Ok(true) => inc_new += 1,
@@ -1032,14 +1406,102 @@ fn import_ibkr_csv(
         }
     }
 
-    Ok(format!(
+    let mut msg = format!(
         "{}: {} trades ({} new), {} income ({} new)",
         filename,
         tx_new + tx_dup,
         tx_new,
         inc_new + inc_dup,
         inc_new,
-    ))
+    );
+    if rate_misses > 0 {
+        msg.push_str(&format!(", {} skipped (no PTAX rate)", rate_misses));
+    }
+    Ok(msg)
+}
+
+/// Fetch BCB PTAX rates for a set of (currency, date) pairs.
+/// Groups by currency and uses range fetch when possible, falls back to individual fetches.
+fn fetch_ptax_rates_blocking(
+    keys: &std::collections::HashSet<(String, chrono::NaiveDate)>,
+) -> std::collections::HashMap<(String, chrono::NaiveDate), f64> {
+    use std::collections::HashMap;
+
+    if keys.is_empty() {
+        return HashMap::new();
+    }
+
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("[import] failed to create tokio runtime: {e}");
+            return HashMap::new();
+        }
+    };
+
+    rt.block_on(async {
+        let mut results: HashMap<(String, chrono::NaiveDate), f64> = HashMap::new();
+
+        // Group dates by currency
+        let mut by_currency: HashMap<String, Vec<chrono::NaiveDate>> = HashMap::new();
+        for (currency, date) in keys {
+            by_currency
+                .entry(currency.clone())
+                .or_default()
+                .push(*date);
+        }
+
+        for (currency, dates) in &by_currency {
+            let min_date = *dates.iter().min().unwrap();
+            let max_date = *dates.iter().max().unwrap();
+
+            // Try range fetch first (one API call for all dates of this currency)
+            match investimentos_core::api::bcb_ptax::fetch_rates_range(currency, min_date, max_date).await {
+                Ok(range_rates) => {
+                    let rate_map: HashMap<chrono::NaiveDate, f64> =
+                        range_rates.into_iter().collect();
+
+                    for &date in dates {
+                        // Find exact or closest rate (weekends/holidays)
+                        if let Some(rate) = find_closest_rate(&rate_map, date) {
+                            results.insert((currency.clone(), date), rate);
+                        } else {
+                            eprintln!("[import] no PTAX rate for {} on {}", currency, date);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[import] range PTAX fetch failed for {}: {}, trying individual", currency, e);
+                    // Fallback: fetch individually
+                    for &date in dates {
+                        match investimentos_core::api::bcb_ptax::fetch_rate(currency, date).await {
+                            Ok(rate) => {
+                                results.insert((currency.clone(), date), rate);
+                            }
+                            Err(e) => {
+                                eprintln!("[import] PTAX fetch failed for {} on {}: {}", currency, date, e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        results
+    })
+}
+
+/// Find the closest PTAX rate for a target date, looking back up to 5 days.
+fn find_closest_rate(
+    rate_map: &std::collections::HashMap<chrono::NaiveDate, f64>,
+    target: chrono::NaiveDate,
+) -> Option<f64> {
+    for days_back in 0..6 {
+        if let Some(&rate) = rate_map.get(&(target - chrono::Duration::days(days_back))) {
+            return Some(rate);
+        }
+    }
+    None
 }
 
 /// Parse a number from IBKR CSV, stripping thousand-separator commas.
