@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{Duration, Local, NaiveDate};
 
 use crate::api::{bcb_ptax, coingecko, tesouro, yahoo};
+use crate::calendar;
 use crate::db::queries;
 use crate::db::Database;
 use crate::types::DailyPrice;
@@ -26,6 +27,14 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
     for (symbol, asset_type, currency) in &symbols {
         if asset_type == "crypto" {
             has_crypto = true;
+            continue;
+        }
+
+        // Don't pollute daily_prices with weekend/holiday rows: when the market is
+        // closed, Yahoo returns the last traded price, not a price for today.
+        // Writing it as `today` creates phantom data points that also trick
+        // backfill_date_range into thinking the symbol is fully up to date.
+        if !calendar::is_trading_day(today, asset_type) {
             continue;
         }
 
@@ -226,9 +235,9 @@ async fn backfill_crypto(
     let mut symbols_failed = 0;
     let mut symbols_up_to_date = 0;
 
-    for (symbol, _asset_type, _currency) in symbols {
-        let (start, end) = match backfill_date_range(db, symbol, today) {
-            Ok(Some(range)) => range,
+    for (symbol, asset_type, _currency) in symbols {
+        let (start, end, missing) = match backfill_date_range(db, symbol, asset_type, today) {
+            Ok(Some(plan)) => plan,
             Ok(None) => { symbols_up_to_date += 1; continue; }
             Err(_) => continue,
         };
@@ -237,6 +246,9 @@ async fn backfill_crypto(
         match coingecko::fetch_btc_brl_history(start, end).await {
             Ok(prices) => {
                 for (date, price) in &prices {
+                    if !missing.contains(date) {
+                        continue;
+                    }
                     if queries::upsert_daily_price(db, &DailyPrice {
                         symbol: symbol.clone(), date: *date, close_price: *price,
                         currency: "BRL".to_string(), brl_rate: 1.0,
@@ -268,8 +280,8 @@ async fn backfill_stocks(
     let mut symbols_up_to_date = 0;
 
     for (symbol, asset_type, currency) in symbols {
-        let (start, end) = match backfill_date_range(db, symbol, today) {
-            Ok(Some(range)) => range,
+        let (start, end, missing) = match backfill_date_range(db, symbol, asset_type, today) {
+            Ok(Some(plan)) => plan,
             Ok(None) => { symbols_up_to_date += 1; continue; }
             Err(_) => continue,
         };
@@ -303,6 +315,9 @@ async fn backfill_stocks(
         };
 
         for (date, close_price) in &history {
+            if !missing.contains(date) {
+                continue;
+            }
             let brl_rate = if currency != "BRL" {
                 match rate_map.as_ref().and_then(|m| find_closest_rate(m, *date)) {
                     Some(rate) => rate,
@@ -337,8 +352,8 @@ async fn backfill_tesouro(
     // Check if any symbol actually needs backfilling
     let needs_backfill: Vec<_> = symbols
         .iter()
-        .filter(|(sym, _, _)| {
-            backfill_date_range(db, sym, today)
+        .filter(|(sym, at, _)| {
+            backfill_date_range(db, sym, at, today)
                 .ok()
                 .flatten()
                 .is_some()
@@ -374,9 +389,9 @@ async fn backfill_tesouro(
     let mut prices_backfilled = 0;
     let mut symbols_up_to_date = 0;
 
-    for (symbol, _, _) in symbols {
-        let (start, end) = match backfill_date_range(db, symbol, today) {
-            Ok(Some(range)) => range,
+    for (symbol, asset_type, _) in symbols {
+        let (start, end, missing) = match backfill_date_range(db, symbol, asset_type, today) {
+            Ok(Some(plan)) => plan,
             Ok(None) => {
                 symbols_up_to_date += 1;
                 continue;
@@ -415,6 +430,9 @@ async fn backfill_tesouro(
             };
 
             if date < start || date > end {
+                continue;
+            }
+            if !missing.contains(&date) {
                 continue;
             }
 
@@ -458,38 +476,46 @@ fn parse_tesouro_symbol(symbol: &str) -> (String, String) {
     }
 }
 
-/// Compute the date range that needs backfilling for a symbol.
+/// Compute a backfill plan for a symbol: the date range to fetch, plus the exact
+/// set of trading days inside it that are actually missing.
+///
+/// The range is the tightest `[min_missing, max_missing]` window so a single API
+/// call covers every gap (prefix, middle, or suffix). The `missing` set lets the
+/// caller increment `prices_backfilled` only for genuinely new dates — without
+/// this, idempotent re-upserts of already-present dates (notably the Tesouro CSV
+/// re-download) would keep the worker counter > 0 forever and prevent
+/// `start_backfill_worker` from terminating.
 fn backfill_date_range(
     db: &Database,
     symbol: &str,
+    asset_type: &str,
     today: NaiveDate,
-) -> Result<Option<(NaiveDate, NaiveDate)>, Box<dyn std::error::Error>> {
+) -> Result<Option<(NaiveDate, NaiveDate, HashSet<NaiveDate>)>, Box<dyn std::error::Error>> {
     let txs = queries::get_transactions_by_symbol(db, symbol)?;
     let first_tx_date = match txs.first() {
         Some(tx) => tx.date,
         None => return Ok(None),
     };
 
-    let earliest_price = {
-        let mut stmt = db.conn().prepare("SELECT MIN(date) FROM daily_prices WHERE symbol = ?")?;
-        let result: Option<String> = stmt.query_row([symbol], |row| row.get(0)).ok().flatten();
-        result.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+    let present: HashSet<NaiveDate> = {
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT date FROM daily_prices WHERE symbol = ?")?;
+        let rows = stmt.query_map([symbol], |row| row.get::<_, String>(0))?;
+        rows.filter_map(|r| r.ok())
+            .filter_map(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+            .collect()
     };
 
-    let (start, end) = match earliest_price {
-        None => (first_tx_date, today),
-        Some(ep) if ep > first_tx_date => (first_tx_date, ep - Duration::days(1)),
-        Some(_) => {
-            match queries::get_latest_price_date(db, symbol)? {
-                Some(last) if last >= today - Duration::days(1) => return Ok(None),
-                Some(last) => (last + Duration::days(1), today),
-                None => (first_tx_date, today),
-            }
-        }
-    };
-
-    if start >= end { return Ok(None); }
-    Ok(Some((start, end)))
+    let missing_vec =
+        calendar::missing_trading_days(first_tx_date, today, asset_type, &present);
+    if missing_vec.is_empty() {
+        return Ok(None);
+    }
+    let start = *missing_vec.first().unwrap();
+    let end = *missing_vec.last().unwrap();
+    let missing: HashSet<NaiveDate> = missing_vec.into_iter().collect();
+    Ok(Some((start, end, missing)))
 }
 
 /// Check if an error indicates rate limiting.
@@ -508,4 +534,140 @@ fn find_closest_rate(rate_map: &HashMap<NaiveDate, f64>, target: NaiveDate) -> O
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{DailyPrice, Source, Transaction, TxType};
+
+    fn mk_tx(symbol: &str, date: NaiveDate, asset_type: crate::types::AssetType) -> Transaction {
+        Transaction {
+            id: None,
+            source: Source::Manual,
+            asset_type,
+            symbol: symbol.to_string(),
+            tx_type: TxType::Buy,
+            date,
+            quantity: 1.0,
+            unit_price: Some(1.0),
+            currency: "BRL".to_string(),
+            total_value: 1.0,
+            brl_rate: 1.0,
+            total_brl: 1.0,
+            commission: None,
+            fee_brl: None,
+            notes: None,
+            import_hash: format!("{}-{}", symbol, date),
+        }
+    }
+
+    fn mk_price(symbol: &str, date: NaiveDate) -> DailyPrice {
+        DailyPrice {
+            symbol: symbol.to_string(),
+            date,
+            close_price: 1.0,
+            currency: "BRL".to_string(),
+            brl_rate: 1.0,
+        }
+    }
+
+    #[test]
+    fn backfill_date_range_detects_middle_gap() {
+        let db = Database::open_in_memory().unwrap();
+        let first_tx = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 4, 17).unwrap();
+
+        queries::insert_transaction(&db, &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl))
+            .unwrap();
+
+        // Cover the prefix and one late day, but leave Apr 7–10, 13–14, 16–17 missing.
+        for (m, d) in [(4, 1), (4, 2), (4, 6), (4, 15)] {
+            queries::upsert_daily_price(
+                &db,
+                &mk_price("KULR", NaiveDate::from_ymd_opt(2026, m, d).unwrap()),
+            )
+            .unwrap();
+        }
+
+        let plan = backfill_date_range(&db, "KULR", "stock_intl", today)
+            .unwrap()
+            .expect("expected a backfill plan when middle gaps exist");
+
+        assert_eq!(plan.0, NaiveDate::from_ymd_opt(2026, 4, 7).unwrap());
+        assert_eq!(plan.1, NaiveDate::from_ymd_opt(2026, 4, 17).unwrap());
+        // Missing set must contain only the actually-absent trading days. This is
+        // what callers gate the prices_backfilled counter on so re-upserting a
+        // dense fetch doesn't keep the worker looping forever.
+        let expected: HashSet<NaiveDate> = [
+            (4, 7), (4, 8), (4, 9), (4, 10), (4, 13), (4, 14), (4, 16), (4, 17),
+        ]
+        .iter()
+        .map(|(m, d)| NaiveDate::from_ymd_opt(2026, *m, *d).unwrap())
+        .collect();
+        assert_eq!(plan.2, expected);
+    }
+
+    #[test]
+    fn backfill_date_range_none_when_complete() {
+        let db = Database::open_in_memory().unwrap();
+        let first_tx = NaiveDate::from_ymd_opt(2026, 4, 13).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 4, 17).unwrap();
+
+        queries::insert_transaction(&db, &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl))
+            .unwrap();
+        for d in 13..=17 {
+            queries::upsert_daily_price(
+                &db,
+                &mk_price("KULR", NaiveDate::from_ymd_opt(2026, 4, d).unwrap()),
+            )
+            .unwrap();
+        }
+
+        let range = backfill_date_range(&db, "KULR", "stock_intl", today).unwrap();
+        assert!(range.is_none(), "complete data should not need backfill");
+    }
+
+    #[test]
+    fn backfill_date_range_ignores_weekend_pollution() {
+        // A bogus weekend "today" row from the live-price fetcher must not trick the
+        // gap detector into thinking the symbol is up to date.
+        let db = Database::open_in_memory().unwrap();
+        let first_tx = NaiveDate::from_ymd_opt(2026, 4, 13).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 4, 19).unwrap(); // Sunday
+
+        queries::insert_transaction(&db, &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl))
+            .unwrap();
+        // Only the bogus Sunday row exists — every weekday in between is missing.
+        queries::upsert_daily_price(&db, &mk_price("KULR", today)).unwrap();
+
+        let plan = backfill_date_range(&db, "KULR", "stock_intl", today)
+            .unwrap()
+            .expect("weekend pollution must not mark symbol as up-to-date");
+
+        assert_eq!(plan.0, NaiveDate::from_ymd_opt(2026, 4, 13).unwrap()); // Mon
+        assert_eq!(plan.1, NaiveDate::from_ymd_opt(2026, 4, 17).unwrap()); // Fri
+        assert_eq!(plan.2.len(), 5); // Mon..Fri all missing
+    }
+
+    #[test]
+    fn backfill_date_range_crypto_includes_every_day() {
+        let db = Database::open_in_memory().unwrap();
+        let first_tx = NaiveDate::from_ymd_opt(2026, 4, 13).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 4, 19).unwrap();
+
+        queries::insert_transaction(&db, &mk_tx("BTC", first_tx, crate::types::AssetType::Crypto))
+            .unwrap();
+        // Have only the first and last days; middle 5 (incl. Sat/Sun) are missing for crypto.
+        queries::upsert_daily_price(&db, &mk_price("BTC", first_tx)).unwrap();
+        queries::upsert_daily_price(&db, &mk_price("BTC", today)).unwrap();
+
+        let plan = backfill_date_range(&db, "BTC", "crypto", today)
+            .unwrap()
+            .expect("crypto gaps must be detected on weekend days too");
+
+        assert_eq!(plan.0, NaiveDate::from_ymd_opt(2026, 4, 14).unwrap());
+        assert_eq!(plan.1, NaiveDate::from_ymd_opt(2026, 4, 18).unwrap());
+        assert_eq!(plan.2.len(), 5);
+    }
 }

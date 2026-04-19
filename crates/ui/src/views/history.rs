@@ -661,10 +661,8 @@ fn render_backfill_status(db: &Database) -> AnyElement {
     let mut total_needed: i64 = 0;
     let mut total_have: i64 = 0;
 
-    for (symbol, first_tx, _) in &backfillable {
-        // ~252 trading days per 365 calendar days
-        let calendar_days = (today - *first_tx).num_days().max(0);
-        let needed = (calendar_days as f64 * 252.0 / 365.0).round() as i64;
+    for (symbol, first_tx, at) in &backfillable {
+        let needed = investimentos_core::calendar::trading_days(*first_tx, today, at);
         total_needed += needed;
 
         let have: i64 = conn
