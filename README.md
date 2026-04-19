@@ -20,13 +20,21 @@ Cargo workspace with two crates:
 
 The database lives at `~/Library/Application Support/dinheiros/data.db` on macOS (via `dirs::data_local_dir()`).
 
-## Build & run
+## Run
 
 ```bash
-cargo run --release --bin dinheiros
+cargo run --bin dinheiros
 ```
 
-Tests:
+## Build
+
+Produces a release binary at `target/release/dinheiros`:
+
+```bash
+cargo build --release --bin dinheiros
+```
+
+## Tests
 
 ```bash
 cargo test
