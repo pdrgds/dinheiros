@@ -69,7 +69,7 @@ pub enum AppMode {
 pub struct AppRoot {
     mode: AppMode,
     last_tab: Tab,
-    db: Database,
+    pub db: Database,
     status_message: Option<String>,
     syncing: bool,
     // Settings editing state
@@ -87,6 +87,14 @@ pub struct AppRoot {
     pub history_split: bool,
     pub backfill_status: Arc<Mutex<BackfillStatus>>,
     sync_menu_open: bool,
+    /// Persistent gpui-component Table state for the Positions tab. Lazy-initialised
+    /// on first render so resize/scroll state survives across renders. Wrapped in an
+    /// `Entity` as required by `gpui_component::table::TableState`.
+    pub positions_table: Option<
+        gpui::Entity<
+            gpui_component::table::TableState<views::positions::PositionsTableDelegate>,
+        >,
+    >,
 }
 
 impl AppRoot {
@@ -118,6 +126,7 @@ impl AppRoot {
             history_split: false,
             backfill_status,
             sync_menu_open: false,
+            positions_table: None,
         }
     }
 
@@ -650,7 +659,7 @@ impl AppRoot {
 }
 
 impl Render for AppRoot {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active_tab = match self.mode {
             AppMode::Tab(t) => Some(t),
             _ => None,
@@ -663,7 +672,7 @@ impl Render for AppRoot {
             .bg(theme::BG_PRIMARY)
             .text_color(theme::TEXT_PRIMARY)
             .child(self.render_navbar(active_tab, cx))
-            .child(self.render_content(cx));
+            .child(self.render_content(window, cx));
 
         // Status bar at the bottom
         let backfill_msg = self.backfill_status.lock().unwrap().last_message.clone();
@@ -877,10 +886,10 @@ impl AppRoot {
     }
 
     // ----- content area -----
-    fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         match self.mode {
             AppMode::Tab(Tab::Overview) => views::overview::render_overview(&self.db),
-            AppMode::Tab(Tab::Positions) => views::positions::render_positions(&self.db, self.positions_sort, self.selected_position, cx),
+            AppMode::Tab(Tab::Positions) => views::positions::render_positions(self, window, cx),
             AppMode::Tab(Tab::Income) => views::income::render_income(&self.db),
             AppMode::Tab(Tab::History) => views::history::render_history(&self.db, self.history_range, self.history_split, cx),
             AppMode::Tab(Tab::Insights) => views::insights::render_insights(&self.db),

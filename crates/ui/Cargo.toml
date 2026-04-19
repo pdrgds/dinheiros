@@ -5,7 +5,10 @@ edition = "2021"
 
 [dependencies]
 investimentos-core = { path = "../core" }
-gpui = { package = "gpui-ce", version = "0.3" }
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "564f9fa83145ac8439989242e203471ac86dad11" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "564f9fa83145ac8439989242e203471ac86dad11" }
 dirs = "5"
 chrono = "0.4"
 rusqlite = { version = "0.32", features = ["bundled"] }
