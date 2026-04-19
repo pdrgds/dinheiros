@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use dinheiros_core::parsers::ibkr_flex::{
+use dinheiros_core::parsers::ibkr::{
     classify_ibkr_asset, dividend_to_income, parse_dividend_description, parse_tax_description,
     trade_to_transaction,
 };

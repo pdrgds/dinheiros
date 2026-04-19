@@ -1449,7 +1449,7 @@ fn import_ibkr_csv(
         };
 
         let (symbol, _) =
-            dinheiros_core::parsers::ibkr_flex::parse_dividend_description(description);
+            dinheiros_core::parsers::ibkr::parse_dividend_description(description);
         if symbol.is_empty() {
             continue;
         }
@@ -1469,7 +1469,7 @@ fn import_ibkr_csv(
             if tf[3].trim() == date_str && tf[4].trim().starts_with(&format!("{}(", symbol)) {
                 tax_amount += parse_ibkr_number(&tf[5]);
                 let (_, origin) =
-                    dinheiros_core::parsers::ibkr_flex::parse_tax_description(tf[4].trim());
+                    dinheiros_core::parsers::ibkr::parse_tax_description(tf[4].trim());
                 if !origin.is_empty() {
                     tax_origin = origin;
                 }
@@ -1614,7 +1614,7 @@ fn import_ibkr_csv(
             }
         };
 
-        let tx = dinheiros_core::parsers::ibkr_flex::trade_to_transaction(
+        let tx = dinheiros_core::parsers::ibkr::trade_to_transaction(
             &t.symbol, &t.currency, t.date, t.quantity, t.trade_price,
             t.proceeds, t.commission, brl_rate,
         );
@@ -1638,7 +1638,7 @@ fn import_ibkr_csv(
             }
         };
 
-        let inc = dinheiros_core::parsers::ibkr_flex::dividend_to_income(
+        let inc = dinheiros_core::parsers::ibkr::dividend_to_income(
             &d.symbol, &d.currency, d.date, d.gross_amount,
             d.tax_amount, &d.tax_origin, brl_rate,
         );

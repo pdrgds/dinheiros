@@ -10,8 +10,6 @@ use crate::db::Database;
 use crate::types::ExportData;
 
 const KNOWN_CONFIG_KEYS: &[&str] = &[
-    "ibkr_flex_token",
-    "ibkr_flex_query_id",
     "coingecko_api_key",
 ];
 

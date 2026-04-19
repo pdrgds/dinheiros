@@ -48,7 +48,7 @@ fn test_export_and_import_roundtrip() {
     .unwrap();
 
     // Insert config
-    queries::set_config(&db, "ibkr_flex_token", "test_token").unwrap();
+    queries::set_config(&db, "coingecko_api_key", "test_token").unwrap();
 
     // Insert income
     queries::insert_income(
@@ -91,7 +91,7 @@ fn test_export_and_import_roundtrip() {
     assert_eq!(price.close_price, 38.0);
 
     // Verify config survived
-    let token = queries::get_config(&db2, "ibkr_flex_token")
+    let token = queries::get_config(&db2, "coingecko_api_key")
         .unwrap()
         .unwrap();
     assert_eq!(token, "test_token");

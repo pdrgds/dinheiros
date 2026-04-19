@@ -3,6 +3,10 @@ name = "dinheiros-ui"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "dinheiros"
+path = "src/main.rs"
+
 [dependencies]
 dinheiros-core = { path = "../core" }
 gpui = { git = "https://github.com/zed-industries/zed" }
