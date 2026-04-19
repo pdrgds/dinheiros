@@ -4,7 +4,7 @@ mod theme;
 mod views;
 
 use gpui::{
-    prelude::*, point, px, size, Bounds, TitlebarOptions, WindowBounds, WindowOptions,
+    prelude::*, point, px, size, Bounds, QuitMode, TitlebarOptions, WindowBounds, WindowOptions,
 };
 use dinheiros_core::db::{queries, Database};
 
@@ -20,6 +20,21 @@ fn format_bounds(b: Bounds<gpui::Pixels>) -> String {
         f32::from(b.size.width),
         f32::from(b.size.height),
     )
+}
+
+/// GPUI's macOS `open_window` interprets the supplied bounds as a content
+/// rect (passed to `initWithContentRect:`), but `window_bounds()` reports the
+/// outer frame rect — so a naive save/restore roundtrip grows the height by
+/// one titlebar every cycle. Combining the frame origin with the viewport
+/// size gives a stable, symmetric "content bounds" to persist.
+fn content_bounds_for_save(window: &gpui::Window) -> Option<Bounds<gpui::Pixels>> {
+    match window.window_bounds() {
+        WindowBounds::Windowed(frame) => Some(Bounds {
+            origin: frame.origin,
+            size: window.viewport_size(),
+        }),
+        _ => None,
+    }
 }
 
 fn parse_bounds(s: &str) -> Option<Bounds<gpui::Pixels>> {
@@ -43,6 +58,7 @@ fn main() {
         .run(|cx: &mut gpui::App| {
         gpui_component::init(cx);
         gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        cx.set_quit_mode(QuitMode::LastWindowClosed);
         // Flatten the Table surface onto the app's BG_PRIMARY (our dark navy)
         // so the positions grid reads as part of the window, not as a pure-black
         // card floating on navy. gpui-component's default dark `background` is
@@ -86,7 +102,7 @@ fn main() {
                 // Cmd+W path: fires when the user explicitly closes the window.
                 let db_path = db_path_for_close.clone();
                 window.on_window_should_close(cx, move |window, _cx| {
-                    if let WindowBounds::Windowed(rect) = window.window_bounds() {
+                    if let Some(rect) = content_bounds_for_save(window) {
                         if let Ok(db) = Database::open(&db_path) {
                             let _ = queries::set_config(
                                 &db,
@@ -109,7 +125,7 @@ fn main() {
         cx.on_app_quit(move |cx| {
             for handle in cx.windows() {
                 let _ = handle.update(cx, |_, window, _| {
-                    if let WindowBounds::Windowed(rect) = window.window_bounds() {
+                    if let Some(rect) = content_bounds_for_save(window) {
                         if let Ok(db) = Database::open(&db_path_for_quit) {
                             let _ = queries::set_config(
                                 &db,
