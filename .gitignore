@@ -3,4 +3,5 @@
 *.db-journal
 .DS_Store
 .superpowers/
+.worktrees/
 input-files/
