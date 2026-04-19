@@ -639,22 +639,36 @@ impl AppRoot {
     }
 
     fn do_export(&mut self, cx: &mut Context<Self>) {
-        let out_path = dirs::data_local_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("dinheiros")
-            .join("export.json");
+        let default_dir = dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let suggested_name = format!(
+            "dinheiros-export-{}.json",
+            chrono::Local::now().format("%Y-%m-%dT%H-%M-%S")
+        );
+        let rx = cx.prompt_for_new_path(&default_dir, Some(&suggested_name));
 
-        match export::export_to_json(&self.db, &out_path) {
-            Ok(()) => {
-                self.status_message = Some(format!("Exported to {}", out_path.display()));
-                println!("[export] success: {}", out_path.display());
-            }
-            Err(e) => {
-                self.status_message = Some(format!("Export failed: {}", e));
-                eprintln!("[export] error: {}", e);
-            }
-        }
-        cx.notify();
+        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+            let path = match rx.await {
+                Ok(Ok(Some(p))) => p,
+                _ => return,
+            };
+
+            let _ = this.update(cx, |this, cx: &mut Context<Self>| {
+                match export::export_to_json(&this.db, &path) {
+                    Ok(()) => {
+                        this.status_message = Some(format!("Exported to {}", path.display()));
+                        println!("[export] success: {}", path.display());
+                    }
+                    Err(e) => {
+                        this.status_message = Some(format!("Export failed: {}", e));
+                        eprintln!("[export] error: {}", e);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 
