@@ -25,7 +25,7 @@ struct MarketChartResponse {
 
 fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent("investimentos/0.1")
+        .user_agent("dinheiros/0.1")
         .build()
         .expect("failed to build reqwest client")
 }

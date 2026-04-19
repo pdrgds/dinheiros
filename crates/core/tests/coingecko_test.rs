@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use investimentos_core::api::coingecko;
+use dinheiros_core::api::coingecko;
 
 #[tokio::test]
 async fn test_fetch_btc_brl_current() {

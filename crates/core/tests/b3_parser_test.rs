@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use investimentos_core::parsers::b3::{extract_symbol, parse_b3_xlsx};
-use investimentos_core::{AssetType, IncomeType, Source, TxType};
+use dinheiros_core::parsers::b3::{extract_symbol, parse_b3_xlsx};
+use dinheiros_core::{AssetType, IncomeType, Source, TxType};
 
 fn fixture_path(filename: &str) -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

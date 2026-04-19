@@ -1,9 +1,9 @@
 use chrono::NaiveDate;
-use investimentos_core::parsers::ibkr_flex::{
+use dinheiros_core::parsers::ibkr_flex::{
     classify_ibkr_asset, dividend_to_income, parse_dividend_description, parse_tax_description,
     trade_to_transaction,
 };
-use investimentos_core::{AssetType, TxType};
+use dinheiros_core::{AssetType, TxType};
 
 #[test]
 fn test_classify_ibkr_currency() {

@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use investimentos_core::api::bcb_ptax;
+use dinheiros_core::api::bcb_ptax;
 
 #[tokio::test]
 async fn test_fetch_usd_brl_rate() {

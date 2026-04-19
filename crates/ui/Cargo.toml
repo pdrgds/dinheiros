@@ -1,10 +1,10 @@
 [package]
-name = "investimentos-ui"
+name = "dinheiros-ui"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-investimentos-core = { path = "../core" }
+dinheiros-core = { path = "../core" }
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "564f9fa83145ac8439989242e203471ac86dad11" }

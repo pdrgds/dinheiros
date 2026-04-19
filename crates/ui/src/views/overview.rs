@@ -1,8 +1,8 @@
 use gpui::{div, prelude::*, px, AnyElement, Div, FontWeight, Rgba};
 
-use investimentos_core::db::Database;
-use investimentos_core::portfolio;
-use investimentos_core::types::*;
+use dinheiros_core::db::Database;
+use dinheiros_core::portfolio;
+use dinheiros_core::types::*;
 
 use crate::theme;
 use crate::views::format_brl;

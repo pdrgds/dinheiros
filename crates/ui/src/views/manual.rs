@@ -51,7 +51,7 @@ pub fn render_manual_gold() -> AnyElement {
                         .text_xs()
                         .text_color(theme::TEXT_SECONDARY)
                         .mt_2()
-                        .child("Tip: run `investimentos import --file gold.json` from the terminal"),
+                        .child("Tip: run `dinheiros import --file gold.json` from the terminal"),
                 ),
         )
         .into_any_element()

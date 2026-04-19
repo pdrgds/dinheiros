@@ -25,7 +25,7 @@ pub async fn fetch_tesouro_price(symbol: &str) -> Result<f64, Box<dyn std::error
 
     let resp = client
         .get(&url)
-        .header("User-Agent", "investimentos-v2/0.1")
+        .header("User-Agent", "dinheiros/0.1")
         .send()
         .await?;
 

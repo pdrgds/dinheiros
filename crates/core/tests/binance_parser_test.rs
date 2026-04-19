@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use investimentos_core::parsers::binance::parse_binance_csv;
-use investimentos_core::{AssetType, Source, TxType};
+use dinheiros_core::parsers::binance::parse_binance_csv;
+use dinheiros_core::{AssetType, Source, TxType};
 
 fn fixture_path(filename: &str) -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

@@ -1,4 +1,4 @@
-# Investimentos v2
+# Dinheiros
 
 A personal investment portfolio tracker for Brazilian and international assets. Native desktop app written in Rust with a local-first SQLite database — no cloud, no accounts, no tracking.
 
@@ -18,14 +18,14 @@ Cargo workspace with two crates:
 - `crates/core` — data model, SQLite schema/queries, parsers (B3/IBKR/Binance), price/FX API clients, portfolio math, reconciliation, JSON export/import.
 - `crates/ui` — GPUI desktop app (uses a local `gpui-ce` patch via `../gpui-ce`).
 
-The database lives at `~/Library/Application Support/investimentos-v2/data.db` on macOS (via `dirs::data_local_dir()`).
+The database lives at `~/Library/Application Support/dinheiros/data.db` on macOS (via `dirs::data_local_dir()`).
 
 ## Build & run
 
 Requires a local checkout of `gpui-ce` as a sibling directory (`../gpui-ce`) — see `Cargo.toml` patch section.
 
 ```bash
-cargo run -p investimentos-ui --release
+cargo run -p dinheiros-ui --release
 ```
 
 Tests:

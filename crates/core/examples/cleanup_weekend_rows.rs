@@ -1,16 +1,16 @@
 use std::path::PathBuf;
 
-use investimentos_core::db::Database;
-use investimentos_core::maintenance;
+use dinheiros_core::db::Database;
+use dinheiros_core::maintenance;
 
 fn main() {
     let db_path: PathBuf = match std::env::args().nth(1) {
         Some(p) => PathBuf::from(p),
         None => {
-            // macOS default: ~/Library/Application Support/investimentos-v2/data.db
+            // macOS default: ~/Library/Application Support/dinheiros/data.db
             let home = std::env::var("HOME").expect("HOME not set");
             PathBuf::from(home)
-                .join("Library/Application Support/investimentos-v2/data.db")
+                .join("Library/Application Support/dinheiros/data.db")
         }
     };
 

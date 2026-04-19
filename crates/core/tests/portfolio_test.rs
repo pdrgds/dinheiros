@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
-use investimentos_core::db::queries;
-use investimentos_core::db::Database;
-use investimentos_core::portfolio;
-use investimentos_core::*;
+use dinheiros_core::db::queries;
+use dinheiros_core::db::Database;
+use dinheiros_core::portfolio;
+use dinheiros_core::*;
 
 fn make_tx(
     symbol: &str,

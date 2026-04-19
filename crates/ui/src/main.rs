@@ -6,7 +6,7 @@ mod views;
 use gpui::{
     prelude::*, point, px, size, Bounds, TitlebarOptions, WindowBounds, WindowOptions,
 };
-use investimentos_core::db::{queries, Database};
+use dinheiros_core::db::{queries, Database};
 
 const WINDOW_BOUNDS_CONFIG_KEY: &str = "window_bounds";
 
@@ -57,7 +57,7 @@ fn main() {
         }
         let db_path = dirs::data_local_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("investimentos-v2")
+            .join("dinheiros")
             .join("data.db");
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();

@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
-use investimentos_core::db::queries;
-use investimentos_core::db::Database;
-use investimentos_core::*;
+use dinheiros_core::db::queries;
+use dinheiros_core::db::Database;
+use dinheiros_core::*;
 
 #[test]
 fn test_create_database_and_tables() {

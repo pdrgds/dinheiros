@@ -1,10 +1,10 @@
 use chrono::NaiveDate;
 use tempfile::NamedTempFile;
 
-use investimentos_core::db::queries;
-use investimentos_core::db::Database;
-use investimentos_core::export;
-use investimentos_core::*;
+use dinheiros_core::db::queries;
+use dinheiros_core::db::Database;
+use dinheiros_core::export;
+use dinheiros_core::*;
 
 #[test]
 fn test_export_and_import_roundtrip() {

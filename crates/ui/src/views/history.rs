@@ -8,7 +8,7 @@ use gpui::{
 };
 use rusqlite::params;
 
-use investimentos_core::db::Database;
+use dinheiros_core::db::Database;
 
 use crate::app::AppRoot;
 use crate::theme;
@@ -662,7 +662,7 @@ fn render_backfill_status(db: &Database) -> AnyElement {
     let mut total_have: i64 = 0;
 
     for (symbol, first_tx, at) in &backfillable {
-        let needed = investimentos_core::calendar::trading_days(*first_tx, today, at);
+        let needed = dinheiros_core::calendar::trading_days(*first_tx, today, at);
         total_needed += needed;
 
         let have: i64 = conn
@@ -761,7 +761,7 @@ fn compute_history_data_by_category(db: &Database) -> HistorySeries {
         tesouro: BTreeMap::new(), crypto: BTreeMap::new(),
     };
 
-    let transactions = match investimentos_core::db::queries::get_all_transactions(db) {
+    let transactions = match dinheiros_core::db::queries::get_all_transactions(db) {
         Ok(txs) => txs,
         Err(_) => return empty,
     };
@@ -804,8 +804,8 @@ fn compute_history_data_by_category(db: &Database) -> HistorySeries {
             let key = (tx.symbol.clone(), tx.date);
             let entry = by_sym_date.entry(key).or_insert((0.0, 0.0));
             match tx.tx_type {
-                investimentos_core::types::TxType::Buy => entry.0 += tx.quantity,
-                investimentos_core::types::TxType::Sell => entry.1 += tx.quantity,
+                dinheiros_core::types::TxType::Buy => entry.0 += tx.quantity,
+                dinheiros_core::types::TxType::Sell => entry.1 += tx.quantity,
                 _ => {}
             }
         }
@@ -829,11 +829,11 @@ fn compute_history_data_by_category(db: &Database) -> HistorySeries {
             }
             let entry = holdings.entry(tx.symbol.clone()).or_insert(0.0);
             match tx.tx_type {
-                investimentos_core::types::TxType::Buy
-                | investimentos_core::types::TxType::FractionAuction => {
+                dinheiros_core::types::TxType::Buy
+                | dinheiros_core::types::TxType::FractionAuction => {
                     *entry += tx.quantity;
                 }
-                investimentos_core::types::TxType::Sell => {
+                dinheiros_core::types::TxType::Sell => {
                     *entry -= tx.quantity;
                 }
                 _ => {}

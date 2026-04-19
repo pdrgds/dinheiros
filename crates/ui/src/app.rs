@@ -6,8 +6,8 @@ use gpui::{
     SharedString, Window,
 };
 
-use investimentos_core::db::Database;
-use investimentos_core::export;
+use dinheiros_core::db::Database;
+use dinheiros_core::export;
 
 use crate::theme;
 use crate::views;
@@ -150,7 +150,7 @@ impl AppRoot {
     }
 
     fn load_settings_from_db(&mut self) {
-        use investimentos_core::db::queries;
+        use dinheiros_core::db::queries;
         self.settings_fields[0] = queries::get_config(&self.db, "coingecko_api_key")
             .ok()
             .flatten()
@@ -159,7 +159,7 @@ impl AppRoot {
     }
 
     fn save_settings_to_db(&mut self, cx: &mut Context<Self>) {
-        use investimentos_core::db::queries;
+        use dinheiros_core::db::queries;
         match queries::set_config(&self.db, "coingecko_api_key", &self.settings_fields[0]) {
             Ok(_) => {
                 self.status_message = Some("Settings saved.".to_string());
@@ -313,16 +313,16 @@ impl AppRoot {
         };
 
         let total = quantity * unit_price;
-        let import_hash = investimentos_core::hash_string(
+        let import_hash = dinheiros_core::hash_string(
             &format!("manual:gold:{}:{}:{}", date, quantity, unit_price),
         );
 
-        let tx = investimentos_core::Transaction {
+        let tx = dinheiros_core::Transaction {
             id: None,
-            source: investimentos_core::Source::Manual,
-            asset_type: investimentos_core::AssetType::Gold,
+            source: dinheiros_core::Source::Manual,
+            asset_type: dinheiros_core::AssetType::Gold,
             symbol: "GOLD".to_string(),
-            tx_type: investimentos_core::TxType::Buy,
+            tx_type: dinheiros_core::TxType::Buy,
             date,
             quantity,
             unit_price: Some(unit_price),
@@ -336,7 +336,7 @@ impl AppRoot {
             import_hash,
         };
 
-        match investimentos_core::db::queries::insert_transaction(&self.db, &tx) {
+        match dinheiros_core::db::queries::insert_transaction(&self.db, &tx) {
             Ok(true) => {
                 self.status_message =
                     Some(format!("Gold added: {:.4}g at R$ {:.2}/g = R$ {:.2}", quantity, unit_price, total));
@@ -371,7 +371,7 @@ impl AppRoot {
 
         let db_path: PathBuf = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("investimentos-v2")
+            .join("dinheiros")
             .join("data.db");
 
         cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
@@ -397,17 +397,17 @@ impl AppRoot {
             for path in &paths {
                 let msg = match source {
                     "b3" => {
-                        match investimentos_core::parsers::b3::parse_b3_xlsx(path) {
+                        match dinheiros_core::parsers::b3::parse_b3_xlsx(path) {
                             Ok(result) => {
                                 let mut tx_new = 0u32;
                                 let mut inc_new = 0u32;
                                 for tx in &result.transactions {
-                                    if let Ok(true) = investimentos_core::db::queries::insert_transaction(&db, tx) {
+                                    if let Ok(true) = dinheiros_core::db::queries::insert_transaction(&db, tx) {
                                         tx_new += 1;
                                     }
                                 }
                                 for inc in &result.income {
-                                    if let Ok(true) = investimentos_core::db::queries::insert_income(&db, inc) {
+                                    if let Ok(true) = dinheiros_core::db::queries::insert_income(&db, inc) {
                                         inc_new += 1;
                                     }
                                 }
@@ -420,11 +420,11 @@ impl AppRoot {
                         }
                     }
                     "binance" => {
-                        match investimentos_core::parsers::binance::parse_binance_csv(path) {
+                        match dinheiros_core::parsers::binance::parse_binance_csv(path) {
                             Ok(result) => {
                                 let mut tx_new = 0u32;
                                 for tx in &result.transactions {
-                                    if let Ok(true) = investimentos_core::db::queries::insert_transaction(&db, tx) {
+                                    if let Ok(true) = dinheiros_core::db::queries::insert_transaction(&db, tx) {
                                         tx_new += 1;
                                     }
                                 }
@@ -485,7 +485,7 @@ impl AppRoot {
                         s.last_message = Some("Fetching current prices...".to_string());
                         drop(s);
 
-                        match investimentos_core::reconcile::fetch_current_prices(&db).await {
+                        match dinheiros_core::reconcile::fetch_current_prices(&db).await {
                             Ok(n) => {
                                 let mut s = status_writer.lock().unwrap();
                                 s.last_message = Some(format!("{} current prices fetched, backfilling...", n));
@@ -503,7 +503,7 @@ impl AppRoot {
                         s.last_message = Some("Backfilling...".to_string());
                     }
 
-                    match investimentos_core::reconcile::backfill_prices(&db).await {
+                    match dinheiros_core::reconcile::backfill_prices(&db).await {
                         Ok(r) => {
                             let mut s = status_writer.lock().unwrap();
                             s.total_backfilled += r.prices_backfilled;
@@ -598,7 +598,7 @@ impl AppRoot {
         // DB path for the background thread (separate connection)
         let db_path: PathBuf = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("investimentos-v2")
+            .join("dinheiros")
             .join("data.db");
 
         // Shared result slot
@@ -614,7 +614,7 @@ impl AppRoot {
                     Err(e) => return format!("DB error: {e}"),
                 };
 
-                match investimentos_core::reconcile::fetch_current_prices(&db).await {
+                match dinheiros_core::reconcile::fetch_current_prices(&db).await {
                     Ok(n) => format!("{n} current prices fetched"),
                     Err(e) => format!("Price fetch error: {e}"),
                 }
@@ -641,7 +641,7 @@ impl AppRoot {
     fn do_export(&mut self, cx: &mut Context<Self>) {
         let out_path = dirs::data_local_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("investimentos-v2")
+            .join("dinheiros")
             .join("export.json");
 
         match export::export_to_json(&self.db, &out_path) {
@@ -1435,7 +1435,7 @@ fn import_ibkr_csv(
         };
 
         let (symbol, _) =
-            investimentos_core::parsers::ibkr_flex::parse_dividend_description(description);
+            dinheiros_core::parsers::ibkr_flex::parse_dividend_description(description);
         if symbol.is_empty() {
             continue;
         }
@@ -1455,7 +1455,7 @@ fn import_ibkr_csv(
             if tf[3].trim() == date_str && tf[4].trim().starts_with(&format!("{}(", symbol)) {
                 tax_amount += parse_ibkr_number(&tf[5]);
                 let (_, origin) =
-                    investimentos_core::parsers::ibkr_flex::parse_tax_description(tf[4].trim());
+                    dinheiros_core::parsers::ibkr_flex::parse_tax_description(tf[4].trim());
                 if !origin.is_empty() {
                     tax_origin = origin;
                 }
@@ -1560,7 +1560,7 @@ fn import_ibkr_csv(
         let exchange = fields[8].trim();
         if !symbol.is_empty() && !exchange.is_empty() {
             let key = format!("exchange:{}", symbol);
-            let _ = investimentos_core::db::queries::set_config(db, &key, exchange);
+            let _ = dinheiros_core::db::queries::set_config(db, &key, exchange);
         }
     }
 
@@ -1600,11 +1600,11 @@ fn import_ibkr_csv(
             }
         };
 
-        let tx = investimentos_core::parsers::ibkr_flex::trade_to_transaction(
+        let tx = dinheiros_core::parsers::ibkr_flex::trade_to_transaction(
             &t.symbol, &t.currency, t.date, t.quantity, t.trade_price,
             t.proceeds, t.commission, brl_rate,
         );
-        match investimentos_core::db::queries::insert_transaction(db, &tx) {
+        match dinheiros_core::db::queries::insert_transaction(db, &tx) {
             Ok(true) => tx_new += 1,
             Ok(false) => tx_dup += 1,
             Err(_) => {}
@@ -1624,11 +1624,11 @@ fn import_ibkr_csv(
             }
         };
 
-        let inc = investimentos_core::parsers::ibkr_flex::dividend_to_income(
+        let inc = dinheiros_core::parsers::ibkr_flex::dividend_to_income(
             &d.symbol, &d.currency, d.date, d.gross_amount,
             d.tax_amount, &d.tax_origin, brl_rate,
         );
-        match investimentos_core::db::queries::insert_income(db, &inc) {
+        match dinheiros_core::db::queries::insert_income(db, &inc) {
             Ok(true) => inc_new += 1,
             Ok(false) => inc_dup += 1,
             Err(_) => {}
@@ -1685,7 +1685,7 @@ fn fetch_ptax_rates_blocking(
             let max_date = *dates.iter().max().unwrap();
 
             // Try range fetch first (one API call for all dates of this currency)
-            match investimentos_core::api::bcb_ptax::fetch_rates_range(currency, min_date, max_date).await {
+            match dinheiros_core::api::bcb_ptax::fetch_rates_range(currency, min_date, max_date).await {
                 Ok(range_rates) => {
                     let rate_map: HashMap<chrono::NaiveDate, f64> =
                         range_rates.into_iter().collect();
@@ -1703,7 +1703,7 @@ fn fetch_ptax_rates_blocking(
                     eprintln!("[import] range PTAX fetch failed for {}: {}, trying individual", currency, e);
                     // Fallback: fetch individually
                     for &date in dates {
-                        match investimentos_core::api::bcb_ptax::fetch_rate(currency, date).await {
+                        match dinheiros_core::api::bcb_ptax::fetch_rate(currency, date).await {
                             Ok(rate) => {
                                 results.insert((currency.clone(), date), rate);
                             }

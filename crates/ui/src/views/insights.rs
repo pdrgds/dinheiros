@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use gpui::{div, prelude::*, px, AnyElement, Div, FontWeight};
 
-use investimentos_core::db::{queries, Database};
-use investimentos_core::types::*;
+use dinheiros_core::db::{queries, Database};
+use dinheiros_core::types::*;
 
 use crate::theme;
 use crate::views::format_brl;
@@ -295,7 +295,7 @@ fn render_portfolio_summary(db: &Database) -> Div {
         }
     }
 
-    let positions = investimentos_core::portfolio::compute_positions(db).unwrap_or_default();
+    let positions = dinheiros_core::portfolio::compute_positions(db).unwrap_or_default();
     let current_value: f64 = positions.iter().filter_map(|p| p.current_value_brl).sum();
     let cost_basis: f64 = positions.iter().map(|p| p.avg_cost_brl * p.quantity).sum();
 

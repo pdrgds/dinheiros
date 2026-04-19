@@ -7,8 +7,8 @@ use gpui::{
 use gpui_component::table::{Column, ColumnSort, DataTable, TableDelegate, TableState};
 use gpui_component::{Sizable, Size};
 
-use investimentos_core::portfolio;
-use investimentos_core::types::*;
+use dinheiros_core::portfolio;
+use dinheiros_core::types::*;
 
 use crate::app::AppRoot;
 use crate::theme;

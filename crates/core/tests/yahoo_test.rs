@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use investimentos_core::api::yahoo;
+use dinheiros_core::api::yahoo;
 
 #[tokio::test]
 async fn test_fetch_current_price_us_stock() {
