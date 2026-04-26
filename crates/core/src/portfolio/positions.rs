@@ -36,10 +36,12 @@ pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
         });
 
         match tx.tx_type {
-            TxType::Buy => {
+            TxType::Buy | TxType::TransferIn => {
                 entry.net_qty += tx.quantity;
-                // Corporate actions (splits, CUSIP changes) have total_value=0.
-                // They adjust quantity but cost basis transfers from the old shares.
+                // Corporate actions (splits, CUSIP changes) and transfer-in legs
+                // from sources without a price column have total_value=0.
+                // They adjust quantity but the cost basis carries from elsewhere
+                // (or stays unknown until the user backfills it).
                 if tx.total_value > 0.001 {
                     entry.total_cost_orig += tx.total_value;
                     entry.total_cost_brl += tx.total_brl;
@@ -53,6 +55,19 @@ pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
                         entry.total_cost_orig -= entry.total_cost_orig * fraction_sold;
                         entry.total_cost_brl -= entry.total_cost_brl * fraction_sold;
                     }
+                    entry.net_qty -= tx.quantity;
+                }
+            }
+            TxType::TransferOut => {
+                // Custody change, not a disposal: drop quantity but pull cost
+                // basis down proportionally so avg_cost_per_unit is preserved
+                // for whatever quantity remains. Same shape as Sell — the
+                // distinction matters in realized-gain math (handled elsewhere),
+                // not in holdings.
+                if entry.net_qty > 0.0 {
+                    let fraction_out = (tx.quantity / entry.net_qty).min(1.0);
+                    entry.total_cost_orig -= entry.total_cost_orig * fraction_out;
+                    entry.total_cost_brl -= entry.total_cost_brl * fraction_out;
                     entry.net_qty -= tx.quantity;
                 }
             }

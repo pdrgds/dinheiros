@@ -71,6 +71,13 @@ pub enum TxType {
     FractionAuction,
     Send,
     Deposit,
+    /// Custody transfer out of one of the user's brokers. Reduces position
+    /// quantity at the prevailing avg cost; does NOT realize a gain.
+    TransferOut,
+    /// Custody transfer into one of the user's brokers. Adds position
+    /// quantity at whatever cost the source recorded (may be zero when the
+    /// source export has no price column, e.g. plain B3 "Transferência").
+    TransferIn,
 }
 
 impl TxType {
@@ -83,6 +90,8 @@ impl TxType {
             TxType::FractionAuction => "fraction_auction",
             TxType::Send => "send",
             TxType::Deposit => "deposit",
+            TxType::TransferOut => "transfer_out",
+            TxType::TransferIn => "transfer_in",
         }
     }
 
@@ -95,6 +104,8 @@ impl TxType {
             "fraction_auction" => Some(TxType::FractionAuction),
             "send" => Some(TxType::Send),
             "deposit" => Some(TxType::Deposit),
+            "transfer_out" => Some(TxType::TransferOut),
+            "transfer_in" => Some(TxType::TransferIn),
             _ => None,
         }
     }
