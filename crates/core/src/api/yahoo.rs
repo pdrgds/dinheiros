@@ -48,11 +48,7 @@ pub fn to_yahoo_symbol(symbol: &str, asset_type: &str) -> String {
 }
 
 /// Like to_yahoo_symbol but also checks the DB for a stored exchange mapping.
-pub fn to_yahoo_symbol_with_db(
-    symbol: &str,
-    asset_type: &str,
-    db: &crate::db::Database,
-) -> String {
+pub fn to_yahoo_symbol_with_db(symbol: &str, asset_type: &str, db: &crate::db::Database) -> String {
     match asset_type {
         "stock_br" => return format!("{}.SA", symbol),
         "gold" => return "GC=F".to_string(),
@@ -74,19 +70,19 @@ pub fn to_yahoo_symbol_with_db(
 /// US exchanges return None (no suffix needed).
 fn ibkr_exchange_to_yahoo_suffix(exchange: &str) -> Option<&'static str> {
     match exchange {
-        "EBS" => Some("SW"),       // SIX Swiss Exchange
-        "SWB2" | "SWB" => Some("SG"), // Stuttgart
-        "FWB" | "FWB2" => Some("F"),  // Frankfurt
+        "EBS" => Some("SW"),            // SIX Swiss Exchange
+        "SWB2" | "SWB" => Some("SG"),   // Stuttgart
+        "FWB" | "FWB2" => Some("F"),    // Frankfurt
         "IBIS" | "XETRA" => Some("DE"), // Xetra
-        "HEX" => Some("HE"),      // Helsinki
-        "CPH" => Some("CO"),      // Copenhagen
-        "AEB" => Some("AS"),      // Amsterdam (Euronext)
-        "SBF" => Some("PA"),      // Paris (Euronext)
-        "BM" => Some("MC"),       // Madrid
-        "LSE" => Some("L"),       // London
-        "TSE" => Some("TO"),      // Toronto
-        "ASX" => Some("AX"),      // Australia
-        _ => None,                // US exchanges: NASDAQ, NYSE, AMEX, ARCA, BATS, PINK, etc.
+        "HEX" => Some("HE"),            // Helsinki
+        "CPH" => Some("CO"),            // Copenhagen
+        "AEB" => Some("AS"),            // Amsterdam (Euronext)
+        "SBF" => Some("PA"),            // Paris (Euronext)
+        "BM" => Some("MC"),             // Madrid
+        "LSE" => Some("L"),             // London
+        "TSE" => Some("TO"),            // Toronto
+        "ASX" => Some("AX"),            // Australia
+        _ => None,                      // US exchanges: NASDAQ, NYSE, AMEX, ARCA, BATS, PINK, etc.
     }
 }
 

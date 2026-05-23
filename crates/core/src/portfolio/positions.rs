@@ -78,26 +78,25 @@ pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
 
         let latest = queries::get_latest_price(db, symbol)?;
 
-        let (current_price, current_brl_rate, current_value_brl, pnl_brl, pnl_pct) =
-            match latest {
-                Some(price) => {
-                    let value_brl = acc.net_qty * price.close_price * price.brl_rate;
-                    let pnl = value_brl - acc.total_cost_brl;
-                    let pct = if acc.total_cost_brl.abs() > 0.0001 {
-                        pnl / acc.total_cost_brl * 100.0
-                    } else {
-                        0.0
-                    };
-                    (
-                        Some(price.close_price),
-                        Some(price.brl_rate),
-                        Some(value_brl),
-                        Some(pnl),
-                        Some(pct),
-                    )
-                }
-                None => (None, None, None, None, None),
-            };
+        let (current_price, current_brl_rate, current_value_brl, pnl_brl, pnl_pct) = match latest {
+            Some(price) => {
+                let value_brl = acc.net_qty * price.close_price * price.brl_rate;
+                let pnl = value_brl - acc.total_cost_brl;
+                let pct = if acc.total_cost_brl.abs() > 0.0001 {
+                    pnl / acc.total_cost_brl * 100.0
+                } else {
+                    0.0
+                };
+                (
+                    Some(price.close_price),
+                    Some(price.brl_rate),
+                    Some(value_brl),
+                    Some(pnl),
+                    Some(pct),
+                )
+            }
+            None => (None, None, None, None, None),
+        };
 
         positions.push(Position {
             symbol: symbol.clone(),
@@ -116,10 +115,7 @@ pub fn compute_positions(db: &Database) -> Result<Vec<Position>> {
     }
 
     // Compute weights: value / total_value * 100
-    let total_value: f64 = positions
-        .iter()
-        .filter_map(|p| p.current_value_brl)
-        .sum();
+    let total_value: f64 = positions.iter().filter_map(|p| p.current_value_brl).sum();
 
     if total_value > 0.0 {
         for pos in &mut positions {
@@ -148,7 +144,9 @@ pub fn compute_allocations(positions: &[Position]) -> Vec<Allocation> {
 
     for pos in positions {
         let val = pos.current_value_brl.unwrap_or(0.0);
-        *by_type.entry(pos.asset_type.as_str().to_string()).or_insert(0.0) += val;
+        *by_type
+            .entry(pos.asset_type.as_str().to_string())
+            .or_insert(0.0) += val;
     }
 
     let total: f64 = by_type.values().sum();

@@ -1,6 +1,6 @@
-pub mod schema;
-pub mod queries;
 mod path;
+pub mod queries;
+pub mod schema;
 
-pub use schema::Database;
 pub use path::default_db_path;
+pub use schema::Database;

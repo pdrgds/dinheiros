@@ -213,7 +213,7 @@ fn test_get_distinct_symbols() {
         source: Source::Ibkr,
         asset_type: AssetType::StockIntl,
         symbol: "AAPL".to_string(),
-        tx_type: TxType::Sell,
+        tx_type: TxType::Buy,
         date: NaiveDate::from_ymd_opt(2025, 2, 1).unwrap(),
         quantity: 10.0,
         unit_price: Some(175.0),
@@ -352,11 +352,8 @@ fn test_migration_does_not_delete_correctly_classified_sells() {
     {
         let db = Database::open(&path).unwrap();
         // Mirrors what the new parser writes for a Liquidação Debito.
-        queries::insert_transaction(
-            &db,
-            &make_legacy_sell("BBAS3", Some("Liquidação"), "h1"),
-        )
-        .unwrap();
+        queries::insert_transaction(&db, &make_legacy_sell("BBAS3", Some("Liquidação"), "h1"))
+            .unwrap();
     }
 
     let db = Database::open(&path).unwrap();

@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-core:
+    name: test core (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: core
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo build (core)
+        run: cargo build -p dinheiros-core --all-targets
+
+      - name: cargo test (core)
+        run: cargo test -p dinheiros-core --all-targets
+
+  check-ui:
+    name: check ui (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ui
+
+      # `check` rather than `build` because GPUI links are slow and the goal here
+      # is "does the UI crate still compile against current core?". Full release
+      # builds happen in a separate release workflow.
+      - name: cargo check (ui + seed binary)
+        run: cargo check --bin dinheiros --bin dinheiros-seed

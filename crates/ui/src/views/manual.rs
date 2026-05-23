@@ -37,15 +37,10 @@ pub fn render_manual_gold() -> AnyElement {
                         .text_color(theme::YELLOW)
                         .child("Manual Entry"),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme::TEXT_SECONDARY)
-                        .child(
-                            "Gold entries are managed via JSON export/import for now. \
+                .child(div().text_sm().text_color(theme::TEXT_SECONDARY).child(
+                    "Gold entries are managed via JSON export/import for now. \
                              Use the CLI to add gold purchase transactions.",
-                        ),
-                )
+                ))
                 .child(
                     div()
                         .text_xs()

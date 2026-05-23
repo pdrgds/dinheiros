@@ -1,7 +1,15 @@
 [package]
 name = "dinheiros-ui"
-version = "0.1.0"
-edition = "2021"
+description = "Desktop GUI for Dinheiros — a local-first investment portfolio tracker for Brazilian and international assets."
+keywords = ["finance", "portfolio", "gpui", "desktop"]
+categories = ["finance", "gui"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [[bin]]
 name = "dinheiros"

@@ -3,10 +3,10 @@ mod app;
 mod theme;
 mod views;
 
-use gpui::{
-    prelude::*, point, px, size, Bounds, QuitMode, TitlebarOptions, WindowBounds, WindowOptions,
-};
 use dinheiros_core::db::{queries, Database};
+use gpui::{
+    point, prelude::*, px, size, Bounds, QuitMode, TitlebarOptions, WindowBounds, WindowOptions,
+};
 
 const WINDOW_BOUNDS_CONFIG_KEY: &str = "window_bounds";
 
@@ -49,94 +49,101 @@ fn parse_bounds(s: &str) -> Option<Bounds<gpui::Pixels>> {
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
-    Some(Bounds { origin: point(px(x), px(y)), size: size(px(w), px(h)) })
+    Some(Bounds {
+        origin: point(px(x), px(y)),
+        size: size(px(w), px(h)),
+    })
 }
 
 fn main() {
     gpui_platform::application()
         .with_assets(gpui_component_assets::Assets)
         .run(|cx: &mut gpui::App| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
-        cx.set_quit_mode(QuitMode::LastWindowClosed);
-        // Flatten the Table surface onto the app's BG_PRIMARY (our dark navy)
-        // so the positions grid reads as part of the window, not as a pure-black
-        // card floating on navy. gpui-component's default dark `background` is
-        // pitch black, so we override every table-related colour to our navy.
-        {
-            let theme = gpui_component::Theme::global_mut(cx);
-            let bg: gpui::Hsla = theme::BG_PRIMARY.into();
-            theme.colors.background = bg;
-            theme.colors.table = bg;
-            theme.colors.table_even = bg;
-            theme.colors.table_head = bg;
-        }
-        let db_path = dinheiros_core::db::default_db_path();
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-
-        // Restore the last-known window bounds from the config table if present,
-        // otherwise fall back to a centered 1050x850.
-        let saved_bounds: Option<Bounds<gpui::Pixels>> = Database::open(&db_path)
-            .ok()
-            .and_then(|db| queries::get_config(&db, WINDOW_BOUNDS_CONFIG_KEY).ok().flatten())
-            .and_then(|s| parse_bounds(&s));
-        let bounds = saved_bounds
-            .unwrap_or_else(|| Bounds::centered(None, size(px(1050.), px(850.)), cx));
-
-        let db_path_for_close = db_path.clone();
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Investimentos v2".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            move |window, cx| {
-                // Cmd+W path: fires when the user explicitly closes the window.
-                let db_path = db_path_for_close.clone();
-                window.on_window_should_close(cx, move |window, _cx| {
-                    if let Some(rect) = content_bounds_for_save(window) {
-                        if let Ok(db) = Database::open(&db_path) {
-                            let _ = queries::set_config(
-                                &db,
-                                WINDOW_BOUNDS_CONFIG_KEY,
-                                &format_bounds(rect),
-                            );
-                        }
-                    }
-                    true
-                });
-                cx.new(|cx| app::AppRoot::new(db_path_for_close.clone(), cx))
-            },
-        )
-        .unwrap();
-
-        // Cmd+Q / app-quit path: the window-close hook above isn't invoked when
-        // macOS quits the app outright. Register an app-quit observer that
-        // walks the open windows and writes each's bounds before shutdown.
-        let db_path_for_quit = db_path.clone();
-        cx.on_app_quit(move |cx| {
-            for handle in cx.windows() {
-                let _ = handle.update(cx, |_, window, _| {
-                    if let Some(rect) = content_bounds_for_save(window) {
-                        if let Ok(db) = Database::open(&db_path_for_quit) {
-                            let _ = queries::set_config(
-                                &db,
-                                WINDOW_BOUNDS_CONFIG_KEY,
-                                &format_bounds(rect),
-                            );
-                        }
-                    }
-                });
+            gpui_component::init(cx);
+            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            cx.set_quit_mode(QuitMode::LastWindowClosed);
+            // Flatten the Table surface onto the app's BG_PRIMARY (our dark navy)
+            // so the positions grid reads as part of the window, not as a pure-black
+            // card floating on navy. gpui-component's default dark `background` is
+            // pitch black, so we override every table-related colour to our navy.
+            {
+                let theme = gpui_component::Theme::global_mut(cx);
+                let bg: gpui::Hsla = theme::BG_PRIMARY.into();
+                theme.colors.background = bg;
+                theme.colors.table = bg;
+                theme.colors.table_even = bg;
+                theme.colors.table_head = bg;
             }
-            async {}
-        })
-        .detach();
+            let db_path = dinheiros_core::db::default_db_path();
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
 
-        cx.activate(true);
-    });
+            // Restore the last-known window bounds from the config table if present,
+            // otherwise fall back to a centered 1050x850.
+            let saved_bounds: Option<Bounds<gpui::Pixels>> = Database::open(&db_path)
+                .ok()
+                .and_then(|db| {
+                    queries::get_config(&db, WINDOW_BOUNDS_CONFIG_KEY)
+                        .ok()
+                        .flatten()
+                })
+                .and_then(|s| parse_bounds(&s));
+            let bounds = saved_bounds
+                .unwrap_or_else(|| Bounds::centered(None, size(px(1050.), px(850.)), cx));
+
+            let db_path_for_close = db_path.clone();
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("Dinheiros".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                move |window, cx| {
+                    // Cmd+W path: fires when the user explicitly closes the window.
+                    let db_path = db_path_for_close.clone();
+                    window.on_window_should_close(cx, move |window, _cx| {
+                        if let Some(rect) = content_bounds_for_save(window) {
+                            if let Ok(db) = Database::open(&db_path) {
+                                let _ = queries::set_config(
+                                    &db,
+                                    WINDOW_BOUNDS_CONFIG_KEY,
+                                    &format_bounds(rect),
+                                );
+                            }
+                        }
+                        true
+                    });
+                    cx.new(|cx| app::AppRoot::new(db_path_for_close.clone(), cx))
+                },
+            )
+            .unwrap();
+
+            // Cmd+Q / app-quit path: the window-close hook above isn't invoked when
+            // macOS quits the app outright. Register an app-quit observer that
+            // walks the open windows and writes each's bounds before shutdown.
+            let db_path_for_quit = db_path.clone();
+            cx.on_app_quit(move |cx| {
+                for handle in cx.windows() {
+                    let _ = handle.update(cx, |_, window, _| {
+                        if let Some(rect) = content_bounds_for_save(window) {
+                            if let Ok(db) = Database::open(&db_path_for_quit) {
+                                let _ = queries::set_config(
+                                    &db,
+                                    WINDOW_BOUNDS_CONFIG_KEY,
+                                    &format_bounds(rect),
+                                );
+                            }
+                        }
+                    });
+                }
+                async {}
+            })
+            .detach();
+
+            cx.activate(true);
+        });
 }

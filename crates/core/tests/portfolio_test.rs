@@ -473,7 +473,11 @@ fn test_position_without_price() {
 }
 
 #[test]
-fn test_fraction_auction_adds_to_position() {
+fn test_fraction_auction_reduces_position() {
+    // `Leilão de Fração` (Debito) is B3's auction of the fractional residual
+    // left behind by a corporate action: the user *sells* the fractional share.
+    // `compute_positions` treats FractionAuction like a Sell — reduces quantity
+    // and proportionally reduces cost basis.
     let db = Database::open_in_memory().unwrap();
 
     // Buy 10 PETR4
@@ -493,7 +497,7 @@ fn test_fraction_auction_adds_to_position() {
     )
     .unwrap();
 
-    // FractionAuction adds 0.5
+    // FractionAuction sells 0.5 (the residual fraction)
     queries::insert_transaction(
         &db,
         &make_tx(
@@ -513,9 +517,10 @@ fn test_fraction_auction_adds_to_position() {
     let positions = portfolio::compute_positions(&db).unwrap();
     let petr4 = positions.iter().find(|p| p.symbol == "PETR4").unwrap();
 
-    assert!((petr4.quantity - 10.5).abs() < 0.001);
-    // total_cost = 300 + 16 = 316, avg = 316/10.5 ~ 30.095
-    assert!((petr4.avg_cost - 316.0 / 10.5).abs() < 0.01);
+    // 10 - 0.5 = 9.5 shares remaining
+    assert!((petr4.quantity - 9.5).abs() < 0.001);
+    // Cost basis reduced proportionally: 300 * (1 - 0.5/10) = 285, avg = 285/9.5 = 30.00
+    assert!((petr4.avg_cost - 30.0).abs() < 0.01);
 }
 
 #[test]

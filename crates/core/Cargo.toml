@@ -1,7 +1,15 @@
 [package]
 name = "dinheiros-core"
-version = "0.1.0"
-edition = "2021"
+description = "Core data model, parsers, price APIs, and portfolio math for Dinheiros."
+keywords = ["finance", "portfolio", "investments", "sqlite", "brazil"]
+categories = ["finance"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -26,3 +34,4 @@ path = "src/bin/seed_demo.rs"
 
 [dev-dependencies]
 tempfile = "3"
+rust_xlsxwriter = "0.95"
