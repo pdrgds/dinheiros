@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - name: linux-x64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tag push: v0.1.0 → 0.1.0. Manual dispatch: 0.0.0-dev-<short-sha>.
+      # `shell: bash` forces bash even on Windows (Git-for-Windows ships it).
+      - name: Derive version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.0-dev-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux GUI dependencies
+        if: matrix.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libgl1-mesa-dev
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --release --bin dinheiros --target ${{ matrix.target }}
+
+      # `ditto` (not `zip`) preserves extended attributes — without it the
+      # .app may not launch after unzip due to missing xattrs.
+      - name: Package macOS .app
+        if: matrix.name == 'macos-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.value }}"
+          APP="Dinheiros.app"
+          mkdir -p "${APP}/Contents/MacOS"
+          mkdir -p "${APP}/Contents/Resources"
+          cp "target/${{ matrix.target }}/release/dinheiros" "${APP}/Contents/MacOS/dinheiros"
+          chmod +x "${APP}/Contents/MacOS/dinheiros"
+          cat > "${APP}/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleIdentifier</key><string>com.pdrgds.dinheiros</string>
+            <key>CFBundleName</key><string>Dinheiros</string>
+            <key>CFBundleDisplayName</key><string>Dinheiros</string>
+            <key>CFBundleExecutable</key><string>dinheiros</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          ditto -c -k --sequesterRsrc --keepParent "${APP}" "dinheiros-${VERSION}-macos-arm64.zip"
+
+      - name: Package Linux tarball
+        if: matrix.name == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.value }}"
+          STAGE="dinheiros-${VERSION}-linux-x64"
+          mkdir -p "${STAGE}"
+          cp "target/${{ matrix.target }}/release/dinheiros" "${STAGE}/dinheiros"
+          chmod +x "${STAGE}/dinheiros"
+          cat > "${STAGE}/dinheiros.desktop" <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=Dinheiros
+          Exec=dinheiros
+          Icon=dinheiros
+          Categories=Office;Finance;
+          Terminal=false
+          EOF
+          cat > "${STAGE}/README.txt" <<EOF
+          Dinheiros ${VERSION}
+
+          Install:
+            1. Copy 'dinheiros' to a directory on your PATH (e.g. ~/.local/bin).
+            2. (Optional) Copy 'dinheiros.desktop' to ~/.local/share/applications/
+               so the app appears in your launcher.
+
+          Runtime: requires X11 or Wayland + OpenGL. Tested on Ubuntu 22.04+
+          and Debian 12+.
+          EOF
+          tar -czf "${STAGE}.tar.gz" "${STAGE}"
+
+      - name: Package Windows zip
+        if: matrix.name == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.value }}'
+          $stage = "dinheiros-$version-windows-x64"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/dinheiros.exe" "$stage/dinheiros.exe"
+          $readme = @"
+          Dinheiros $version
+
+          Install:
+            1. Unzip anywhere.
+            2. Double-click dinheiros.exe.
+
+          First run: Windows SmartScreen may flag the app because it is
+          unsigned. Click 'More info' then 'Run anyway'.
+          "@
+          Set-Content -Path "$stage/README.txt" -Value $readme
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+
+      # Each matrix entry's working dir contains exactly one of these
+      # patterns (platform-gated above), so the glob matches one file per run.
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinheiros-${{ matrix.name }}
+          path: |
+            dinheiros-*.zip
+            dinheiros-*.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dinheiros-*
+          merge-multiple: true
+
+      - name: List downloaded files (diagnostic)
+        run: ls -la
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dinheiros-*.zip
+            dinheiros-*.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
