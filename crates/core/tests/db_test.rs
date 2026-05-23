@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use dinheiros_core::db::queries;
-use dinheiros_core::db::{Database, CONFIG_KEY_TRANSFER_RECLASSIFY_COUNT};
+use dinheiros_core::db::Database;
 use dinheiros_core::*;
 
 #[test]
@@ -264,90 +264,109 @@ fn test_get_distinct_symbols() {
     assert_eq!(symbols[1].2, "BRL");
 }
 
-/// Inserts a row through the raw connection so we can simulate the legacy
-/// state where the importer wrote `tx_type='sell'` for transfer rows. Bypassing
-/// `insert_transaction` is intentional — that helper round-trips through the
-/// `TxType` enum which now refuses to construct a Sell with a transfer note,
-/// and we need the bad data on disk to test the migration.
-fn raw_insert(
-    db: &Database,
-    tx_type: &str,
-    symbol: &str,
-    notes: Option<&str>,
-    hash: &str,
-) {
-    db.conn()
-        .execute(
-            "INSERT INTO transactions
-                (source, asset_type, symbol, tx_type, date, quantity,
-                 currency, total_value, brl_rate, total_brl, notes, import_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            rusqlite::params![
-                "b3", "stock_br", symbol, tx_type, "2024-04-17", 7.0,
-                "BRL", 396.62, 1.0, 396.62, notes, hash,
-            ],
+fn make_legacy_sell(symbol: &str, notes: Option<&str>, hash: &str) -> Transaction {
+    Transaction {
+        id: None,
+        source: Source::B3,
+        asset_type: AssetType::StockBr,
+        symbol: symbol.to_string(),
+        tx_type: TxType::Sell,
+        date: NaiveDate::from_ymd_opt(2024, 4, 17).unwrap(),
+        quantity: 7.0,
+        unit_price: Some(56.66),
+        currency: "BRL".to_string(),
+        total_value: 396.62,
+        brl_rate: 1.0,
+        total_brl: 396.62,
+        commission: None,
+        fee_brl: None,
+        notes: notes.map(|s| s.to_string()),
+        import_hash: hash.to_string(),
+    }
+}
+
+/// The legacy B3 parser wrote every "Transferência - Liquidação" row as
+/// `tx_type='sell'` regardless of `Entrada/Saída`, hiding the actual buy side
+/// of every Nu Invest purchase. The cleanup migration deletes those rows so
+/// a re-import (with the direction-aware parser) can re-create them correctly.
+#[test]
+fn test_migration_purges_misclassified_transferencia_liquidacao() {
+    let path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+    {
+        let db = Database::open(&path).unwrap();
+        queries::insert_transaction(
+            &db,
+            &make_legacy_sell("BBAS3", Some("Transferência - Liquidação"), "h1"),
         )
         .unwrap();
-}
-
-#[test]
-fn test_transferencia_migration_reclassifies_only_matching_rows() {
-    let path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
-    {
-        let db = Database::open(&path).unwrap();
-        raw_insert(&db, "sell", "BBAS3", Some("Transferência - Liquidação"), "h1");
-        raw_insert(&db, "sell", "PETR4", Some("Transferência - Liquidação"), "h2");
-        // Genuine sell — must be left alone.
-        raw_insert(&db, "sell", "VALE3", Some("Venda em pregão"), "h3");
+        queries::insert_transaction(
+            &db,
+            &make_legacy_sell("PETR4", Some("Transferência - Liquidação"), "h2"),
+        )
+        .unwrap();
+        // Genuine Sell with a different note — must be left alone.
+        queries::insert_transaction(
+            &db,
+            &make_legacy_sell("VALE3", Some("Venda em pregão"), "h3"),
+        )
+        .unwrap();
         // Sell with no note — also left alone.
-        raw_insert(&db, "sell", "ITUB4", None, "h4");
+        queries::insert_transaction(&db, &make_legacy_sell("ITUB4", None, "h4")).unwrap();
     }
 
-    // Re-open: run_migrations() fires on every open. First open above already
-    // did the rewrite, so this open exercises the idempotency branch.
+    // Re-open: run_migrations() runs again. The misclassified rows must be
+    // gone; the second invocation also exercises idempotency.
     let db = Database::open(&path).unwrap();
-
-    let mut by_symbol: std::collections::BTreeMap<String, String> = Default::default();
-    for tx in queries::get_all_transactions(&db).unwrap() {
-        by_symbol.insert(tx.symbol, tx.tx_type.as_str().to_string());
-    }
-
-    assert_eq!(by_symbol["BBAS3"], "transfer_out");
-    assert_eq!(by_symbol["PETR4"], "transfer_out");
-    assert_eq!(by_symbol["VALE3"], "sell", "non-transfer sell must not be touched");
-    assert_eq!(by_symbol["ITUB4"], "sell", "sell without note must not be touched");
-
-    let count_str = queries::get_config(&db, CONFIG_KEY_TRANSFER_RECLASSIFY_COUNT)
+    let symbols: Vec<String> = queries::get_all_transactions(&db)
         .unwrap()
-        .expect("migration must record the count for the UI notice");
-    assert_eq!(count_str, "2");
+        .into_iter()
+        .map(|t| t.symbol)
+        .collect();
+
+    assert!(
+        !symbols.contains(&"BBAS3".to_string()),
+        "misclassified BBAS3 row must be deleted, got {:?}",
+        symbols
+    );
+    assert!(
+        !symbols.contains(&"PETR4".to_string()),
+        "misclassified PETR4 row must be deleted, got {:?}",
+        symbols
+    );
+    assert!(
+        symbols.contains(&"VALE3".to_string()),
+        "real Venda must be kept"
+    );
+    assert!(
+        symbols.contains(&"ITUB4".to_string()),
+        "Sell without 'Transferência' note must be kept"
+    );
 }
 
+/// Regression: the new parser writes Debito Liquidação rows as `tx_type='sell'`,
+/// so its `notes` must NOT exactly equal "Transferência - Liquidação" — otherwise
+/// the cleanup migration would delete freshly-imported rows on every restart.
 #[test]
-fn test_transferencia_migration_is_idempotent_after_clearing_notice() {
-    // Simulates the "UI consumed the notice and cleared the flag" path: the next
-    // run_migrations() must not re-write the count, because the underlying rows
-    // are already transfer_out.
+fn test_migration_does_not_delete_correctly_classified_sells() {
     let path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
     {
         let db = Database::open(&path).unwrap();
-        raw_insert(&db, "sell", "BBAS3", Some("Transferência - Liquidação"), "h1");
-    }
-
-    {
-        let db = Database::open(&path).unwrap();
-        // UI clears the notice key after showing it.
-        db.conn()
-            .execute("DELETE FROM config WHERE key = ?1",
-                     rusqlite::params![CONFIG_KEY_TRANSFER_RECLASSIFY_COUNT])
-            .unwrap();
+        // Mirrors what the new parser writes for a Liquidação Debito.
+        queries::insert_transaction(
+            &db,
+            &make_legacy_sell("BBAS3", Some("Liquidação"), "h1"),
+        )
+        .unwrap();
     }
 
     let db = Database::open(&path).unwrap();
+    let symbols: Vec<String> = queries::get_all_transactions(&db)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.symbol)
+        .collect();
     assert!(
-        queries::get_config(&db, CONFIG_KEY_TRANSFER_RECLASSIFY_COUNT)
-            .unwrap()
-            .is_none(),
-        "no rows changed on re-open, so the notice key must stay cleared"
+        symbols.contains(&"BBAS3".to_string()),
+        "new-parser sell with notes='Liquidação' must survive the migration"
     );
 }

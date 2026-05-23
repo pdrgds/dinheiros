@@ -31,7 +31,7 @@ pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::
             continue;
         }
 
-        let _entrada_saida = cell_str(&row[0]);
+        let entrada_saida = cell_str(&row[0]);
         let data_str = cell_str(&row[1]);
         let movimentacao = cell_str(&row[2]);
         let produto = cell_str(&row[3]);
@@ -53,89 +53,99 @@ pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::
             AssetType::StockBr
         };
 
-        let import_hash = make_import_hash(&data_str, &movimentacao, &produto, quantidade, preco_unitario);
+        let import_hash = make_import_hash(
+            &data_str,
+            &movimentacao,
+            &produto,
+            quantidade,
+            preco_unitario,
+        );
+
+        let is_credito = entrada_saida == "Credito";
+
+        let priced_trade = |tx_type: TxType, notes: Option<&str>| Transaction {
+            id: None,
+            source: Source::B3,
+            asset_type: asset_type.clone(),
+            symbol: symbol.clone(),
+            tx_type,
+            date,
+            quantity: quantidade,
+            unit_price: Some(preco_unitario),
+            currency: "BRL".to_string(),
+            total_value: valor_operacao,
+            brl_rate: 1.0,
+            total_brl: valor_operacao,
+            commission: None,
+            fee_brl: None,
+            notes: notes.map(|s| s.to_string()),
+            import_hash: import_hash.clone(),
+        };
+
+        let unpriced_movement = |tx_type: TxType, notes: &str| Transaction {
+            id: None,
+            source: Source::B3,
+            asset_type: asset_type.clone(),
+            symbol: symbol.clone(),
+            tx_type,
+            date,
+            quantity: quantidade,
+            unit_price: None,
+            currency: "BRL".to_string(),
+            total_value: 0.0,
+            brl_rate: 1.0,
+            total_brl: 0.0,
+            commission: None,
+            fee_brl: None,
+            notes: Some(notes.to_string()),
+            import_hash: import_hash.clone(),
+        };
 
         match movimentacao.as_str() {
-            "Compra" => {
-                transactions.push(Transaction {
-                    id: None,
-                    source: Source::B3,
-                    asset_type,
-                    symbol,
-                    tx_type: TxType::Buy,
-                    date,
-                    quantity: quantidade,
-                    unit_price: Some(preco_unitario),
-                    currency: "BRL".to_string(),
-                    total_value: valor_operacao,
-                    brl_rate: 1.0,
-                    total_brl: valor_operacao,
-                    commission: None,
-                    fee_brl: None,
-                    notes: None,
-                    import_hash,
-                });
-            }
-            "Venda" => {
-                transactions.push(Transaction {
-                    id: None,
-                    source: Source::B3,
-                    asset_type,
-                    symbol,
-                    tx_type: TxType::Sell,
-                    date,
-                    quantity: quantidade,
-                    unit_price: Some(preco_unitario),
-                    currency: "BRL".to_string(),
-                    total_value: valor_operacao,
-                    brl_rate: 1.0,
-                    total_brl: valor_operacao,
-                    commission: None,
-                    fee_brl: None,
-                    notes: None,
-                    import_hash,
-                });
-            }
+            "Compra" => transactions.push(priced_trade(TxType::Buy, None)),
+            "Venda" => transactions.push(priced_trade(TxType::Sell, None)),
+
+            // Settlement record: shares actually moved through B3's clearing.
+            // Credito = settled buy, Debito = settled sell. The legacy parser
+            // ignored the direction and wrote everything as Sell, dropping the
+            // entire buy history of brokers (like Nu Invest) that report buys
+            // through this mechanism instead of plain "Compra". `notes` here
+            // is intentionally "Liquidação" rather than the legacy
+            // "Transferência - Liquidação" so the cleanup migration's exact-
+            // match DELETE doesn't grab freshly-imported rows on next startup.
             "Transferência - Liquidação" => {
-                transactions.push(Transaction {
-                    id: None,
-                    source: Source::B3,
-                    asset_type,
-                    symbol,
-                    tx_type: TxType::Sell,
-                    date,
-                    quantity: quantidade,
-                    unit_price: Some(preco_unitario),
-                    currency: "BRL".to_string(),
-                    total_value: valor_operacao,
-                    brl_rate: 1.0,
-                    total_brl: valor_operacao,
-                    commission: None,
-                    fee_brl: None,
-                    notes: Some("Transferência - Liquidação".to_string()),
-                    import_hash,
-                });
+                let tx_type = if is_credito { TxType::Buy } else { TxType::Sell };
+                transactions.push(priced_trade(tx_type, Some("Liquidação")));
             }
+
+            // Plain custody change between Pedro's own brokers (e.g. Nu→BB).
+            // B3 reports both legs (Debito at source, Credito at destination)
+            // and `compute_positions` groups by symbol, so processing both legs
+            // would double-count the qty and corrupt avg-cost. The priced
+            // Liquidação rows on each side carry the real economics; drop these.
+            "Transferência" => {}
+
+            // Stock split / bonus shares: new quantity at no cost. The Buy
+            // arm in `compute_positions` skips cost basis when total_value=0,
+            // so avg-cost-per-unit dilutes correctly.
+            "Desdobro" => transactions.push(unpriced_movement(TxType::Buy, "Desdobro")),
+            "Bonificação em Ativos" => {
+                transactions.push(unpriced_movement(TxType::Buy, "Bonificação em Ativos"))
+            }
+            // Fractional residual from a corporate action: Credito adds shares,
+            // Debito removes them (typically <1 share rounding).
+            "Fração em Ativos" => {
+                let tx_type = if is_credito { TxType::Buy } else { TxType::Sell };
+                transactions.push(unpriced_movement(tx_type, "Fração em Ativos"));
+            }
+
             "Leilão de Fração" => {
-                transactions.push(Transaction {
-                    id: None,
-                    source: Source::B3,
-                    asset_type,
-                    symbol,
-                    tx_type: TxType::FractionAuction,
-                    date,
-                    quantity: quantidade,
-                    unit_price: Some(preco_unitario),
-                    currency: "BRL".to_string(),
-                    total_value: valor_operacao,
-                    brl_rate: 1.0,
-                    total_brl: valor_operacao,
-                    commission: None,
-                    fee_brl: None,
-                    notes: None,
-                    import_hash,
-                });
+                if !is_credito {
+                    transactions.push(priced_trade(TxType::FractionAuction, None));
+                }
+                // Credito side is the cash payout, not a position move.
             }
+
             "Dividendo" => {
                 income.push(Income {
                     id: None,
@@ -170,6 +180,9 @@ pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::
                     import_hash,
                 });
             }
+
+            // Tesouro position adjustment / FII rendimento / etc. — out of
+            // scope for now. Logged so unfamiliar types surface during import.
             other => {
                 eprintln!("Unknown B3 movimentação type: {}", other);
             }

@@ -1,11 +1,6 @@
 use rusqlite::{Connection, Result};
 use std::path::Path;
 
-/// Config key that stores how many rows the one-time `Transferência - Liquidação`
-/// reclassification migration touched. Set on first migration when count > 0;
-/// the UI reads this to display a backfill notice and then clears the key.
-pub const CONFIG_KEY_TRANSFER_RECLASSIFY_COUNT: &str = "migration_transfers_reclassified_count";
-
 pub struct Database {
     conn: Connection,
 }
@@ -96,55 +91,32 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_income_date         ON income(date);
         ")?;
 
-        self.reclassify_misimported_transferencia_liquidacao()?;
+        self.purge_misclassified_transferencia_liquidacao()?;
         Ok(())
     }
 
-    /// One-time data fix: an older B3 importer wrote every "Transferência - Liquidação"
-    /// row as `tx_type='sell'`, double-counting custody transfers as taxable disposals.
-    /// This UPDATE flips them to `transfer_out` so positions and realized-gain math
-    /// stop treating them as sells.
-    ///
-    /// Idempotent by construction: after the first run nothing matches the criteria,
-    /// so subsequent calls find 0 rows and do nothing. We persist the count on the
-    /// first run that actually changes data so the UI can surface a backfill notice
-    /// once and then clear the key.
-    fn reclassify_misimported_transferencia_liquidacao(&self) -> Result<()> {
+    /// One-time data fix: the legacy B3 importer wrote every "Transferência -
+    /// Liquidação" row as `tx_type='sell'` regardless of `Entrada/Saída`,
+    /// hiding the Credito side (settled buys, including the entire Nu Invest
+    /// buy history). Delete those rows so a re-import with the direction-aware
+    /// parser can re-create them as the correct buy or sell — `INSERT OR IGNORE`
+    /// would otherwise keep the wrong tx_type because the import hash matches.
+    /// Idempotent: subsequent runs find nothing matching.
+    fn purge_misclassified_transferencia_liquidacao(&self) -> Result<()> {
         let count = self.conn.execute(
-            "UPDATE transactions
-             SET tx_type = 'transfer_out'
-             WHERE tx_type = 'sell'
-               AND notes LIKE '%Transferência - Liquidação%'",
+            "DELETE FROM transactions
+             WHERE source = 'b3'
+               AND tx_type = 'sell'
+               AND notes = 'Transferência - Liquidação'",
             [],
         )?;
-
         if count > 0 {
-            // Don't overwrite an existing pending notice — the UI clears the key
-            // after displaying it. A repeat migration that touches more rows
-            // (re-imported legacy data) accumulates into the pending count.
-            let existing: Option<String> = self
-                .conn
-                .query_row(
-                    "SELECT value FROM config WHERE key = ?1",
-                    [CONFIG_KEY_TRANSFER_RECLASSIFY_COUNT],
-                    |row| row.get(0),
-                )
-                .ok();
-            let total = existing
-                .as_deref()
-                .and_then(|s| s.parse::<i64>().ok())
-                .unwrap_or(0)
-                + count as i64;
-            self.conn.execute(
-                "INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)",
-                rusqlite::params![CONFIG_KEY_TRANSFER_RECLASSIFY_COUNT, total.to_string()],
-            )?;
             eprintln!(
-                "[db] reclassified {} 'Transferência - Liquidação' rows from sell to transfer_out",
+                "[db] purged {} misclassified 'Transferência - Liquidação' rows; \
+                 re-import your B3 export to repopulate them with correct buy/sell direction",
                 count
             );
         }
-
         Ok(())
     }
 }

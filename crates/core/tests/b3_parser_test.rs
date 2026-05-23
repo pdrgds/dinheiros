@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use chrono::NaiveDate;
 use dinheiros_core::parsers::b3::{extract_symbol, parse_b3_xlsx};
 use dinheiros_core::{AssetType, IncomeType, Source, TxType};
 
@@ -181,7 +182,6 @@ fn test_b3_transaction_types() {
     let path = fixture_path("movimentacao-2026-04-05-19-45-03.xlsx");
     let result = parse_b3_xlsx(&path).expect("failed to parse XLSX");
 
-    // Verify we have Buy transactions
     let buys: Vec<_> = result
         .transactions
         .iter()
@@ -189,9 +189,133 @@ fn test_b3_transaction_types() {
         .collect();
     assert!(!buys.is_empty(), "Should have Buy transactions");
 
-    // All transactions should have valid unit_price
+    // Priced trades must carry a unit_price; corporate-action rows
+    // (Desdobro, Bonificação) legitimately have no price column.
     for tx in &result.transactions {
-        assert!(tx.unit_price.is_some());
-        assert!(tx.unit_price.unwrap() > 0.0);
+        if tx.total_value > 0.001 {
+            let pu = tx.unit_price.unwrap_or(0.0);
+            assert!(pu > 0.0, "priced tx must have unit_price > 0: {:?}", tx);
+        }
     }
+}
+
+/// Maps a B3 "Transferência - Liquidação" row whose `Entrada/Saída` is `Credito`
+/// to TxType::Buy. These rows are settlement records of a real purchase — the
+/// shares are credited to the broker. The legacy parser misclassified them as
+/// Sell, which dropped Pedro's entire Nu Invest buy history (those buys never
+/// surface as `Compra` in B3 because Nu Invest reports differently from BB).
+#[test]
+fn test_b3_liquidacao_credito_classified_as_buy() {
+    let path = fixture_path("movimentacao-2026-04-05-19-45-03.xlsx");
+    let result = parse_b3_xlsx(&path).expect("failed to parse XLSX");
+
+    let tx = result
+        .transactions
+        .iter()
+        .find(|t| {
+            t.symbol == "BBAS3"
+                && t.date == NaiveDate::from_ymd_opt(2024, 4, 2).unwrap()
+                && (t.quantity - 8.0).abs() < 0.001
+        })
+        .expect("BBAS3 02/04/2024 Liquidação Credito row missing");
+
+    assert_eq!(tx.tx_type, TxType::Buy);
+    assert!((tx.total_value - 453.60).abs() < 0.01, "total_value: {}", tx.total_value);
+    assert!((tx.unit_price.unwrap() - 56.70).abs() < 0.01);
+}
+
+/// Maps a `Liquidação Debito` row to TxType::Sell with proceeds.
+#[test]
+fn test_b3_liquidacao_debito_classified_as_sell() {
+    let path = fixture_path("movimentacao-2026-04-05-19-45-03.xlsx");
+    let result = parse_b3_xlsx(&path).expect("failed to parse XLSX");
+
+    let tx = result
+        .transactions
+        .iter()
+        .find(|t| {
+            t.symbol == "BBAS3"
+                && t.date == NaiveDate::from_ymd_opt(2024, 9, 27).unwrap()
+                && (t.quantity - 73.0).abs() < 0.001
+        })
+        .expect("BBAS3 27/09/2024 Liquidação Debito row missing");
+
+    assert_eq!(tx.tx_type, TxType::Sell);
+    assert!((tx.total_value - 2003.85).abs() < 0.01, "total_value: {}", tx.total_value);
+}
+
+/// Plain `Transferência` rows (without "- Liquidação") record an inter-broker
+/// custody change. Both legs (Debito at source, Credito at destination) appear
+/// in the same B3 export, and `compute_positions` groups by symbol — so
+/// processing both legs would double-count and corrupt the avg-cost math. The
+/// parser drops them; the priced Liquidação rows on each side cover the real
+/// buy/sell economics.
+#[test]
+fn test_b3_plain_transferencia_dropped() {
+    let path = fixture_path("movimentacao-2026-04-05-19-45-03.xlsx");
+    let result = parse_b3_xlsx(&path).expect("failed to parse XLSX");
+
+    // BBAS3 has both a Credito (8 shares to BB) and Debito (8 shares from Nu)
+    // plain Transferência on 05/04/2024. Neither should reach transactions.
+    let on_05_04: Vec<_> = result
+        .transactions
+        .iter()
+        .filter(|t| {
+            t.symbol == "BBAS3"
+                && t.date == NaiveDate::from_ymd_opt(2024, 4, 5).unwrap()
+        })
+        .collect();
+    assert!(
+        on_05_04.is_empty(),
+        "Plain Transferência rows must not appear in transactions, got {:?}",
+        on_05_04
+    );
+}
+
+/// `Desdobro` (stock split) and `Bonificação em Ativos` (bonus shares) credit
+/// new shares without a price. They must produce Buy rows with `total_value=0`
+/// so `compute_positions` adds quantity but preserves cost basis from the
+/// existing position.
+#[test]
+fn test_b3_desdobro_emits_buy_with_zero_cost() {
+    let path = fixture_path("movimentacao-2026-04-05-19-45-03.xlsx");
+    let result = parse_b3_xlsx(&path).expect("failed to parse XLSX");
+
+    let tx = result
+        .transactions
+        .iter()
+        .find(|t| {
+            t.symbol == "BBAS3"
+                && t.date == NaiveDate::from_ymd_opt(2024, 4, 17).unwrap()
+                && (t.quantity - 15.0).abs() < 0.001
+        })
+        .expect("BBAS3 17/04/2024 Desdobro row missing");
+
+    assert_eq!(tx.tx_type, TxType::Buy);
+    assert!(tx.total_value.abs() < 0.01, "Desdobro must have zero cost basis");
+}
+
+/// End-to-end check: a symbol Pedro bought at Nu, transferred to BB, and
+/// eventually sold should now have both Buys and a Sell — not the all-Sell
+/// pattern the legacy parser produced.
+#[test]
+fn test_b3_transferred_symbol_has_buys_and_sell() {
+    let path = fixture_path("movimentacao-2026-04-05-19-45-03.xlsx");
+    let result = parse_b3_xlsx(&path).expect("failed to parse XLSX");
+
+    let bbas3: Vec<_> = result
+        .transactions
+        .iter()
+        .filter(|t| t.symbol == "BBAS3")
+        .collect();
+    let buys = bbas3.iter().filter(|t| t.tx_type == TxType::Buy).count();
+    let sells = bbas3.iter().filter(|t| t.tx_type == TxType::Sell).count();
+
+    // Expected: 4 Liquidação Credito Buys + 1 Desdobro Buy = 5 Buys, 1 Liquidação Debito Sell.
+    assert!(
+        buys >= 4,
+        "expected ≥4 BBAS3 Buys, got {} (Pedro's Nu buys + BB buys + Desdobro)",
+        buys
+    );
+    assert_eq!(sells, 1, "expected exactly 1 BBAS3 Sell (the Liquidação Debito)");
 }
