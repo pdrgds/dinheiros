@@ -121,7 +121,7 @@ pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::
                 transactions.push(priced_trade(tx_type, Some("Liquidação")));
             }
 
-            // Plain custody change between Pedro's own brokers (e.g. Nu→BB).
+            // Plain custody change between two of the user's own brokers.
             // B3 reports both legs (Debito at source, Credito at destination)
             // and `compute_positions` groups by symbol, so processing both legs
             // would double-count the qty and corrupt avg-cost. The priced
