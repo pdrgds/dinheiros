@@ -20,5 +20,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 thiserror = "2"
 urlencoding = "2"
 
+[[bin]]
+name = "dinheiros-seed"
+path = "src/bin/seed_demo.rs"
+
 [dev-dependencies]
 tempfile = "3"
