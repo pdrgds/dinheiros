@@ -90,7 +90,7 @@ fn main() {
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
-                    title: Some("Investimentos v2".into()),
+                    title: Some("Dinheiros".into()),
                     ..Default::default()
                 }),
                 ..Default::default()
