@@ -71,10 +71,7 @@ fn main() {
             theme.colors.table_even = bg;
             theme.colors.table_head = bg;
         }
-        let db_path = dirs::data_local_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("dinheiros")
-            .join("data.db");
+        let db_path = dinheiros_core::db::default_db_path();
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }

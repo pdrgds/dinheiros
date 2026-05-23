@@ -369,10 +369,7 @@ impl AppRoot {
             prompt: None,
         });
 
-        let db_path: PathBuf = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("dinheiros")
-            .join("data.db");
+        let db_path: PathBuf = dinheiros_core::db::default_db_path();
 
         cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
             let paths_result = rx.await;
@@ -596,10 +593,7 @@ impl AppRoot {
         cx.notify();
 
         // DB path for the background thread (separate connection)
-        let db_path: PathBuf = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("dinheiros")
-            .join("data.db");
+        let db_path: PathBuf = dinheiros_core::db::default_db_path();
 
         // Shared result slot
         let result_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
