@@ -17,6 +17,11 @@ path = "src/main.rs"
 
 [dependencies]
 dinheiros-core = { path = "../core" }
+# gpui is unpublished; we depend on it via git. We deliberately do NOT pin a `rev`
+# here because `gpui-component` (below) also pulls `gpui` from this same git URL
+# without a rev — adding a rev would create two parallel sources of `gpui` and
+# break the build with trait-bound mismatches. The commit is pinned via Cargo.lock
+# instead; CI runs with `--locked` to enforce it.
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "564f9fa83145ac8439989242e203471ac86dad11" }

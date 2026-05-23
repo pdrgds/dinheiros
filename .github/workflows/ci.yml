@@ -28,10 +28,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo build (core)
-        run: cargo build -p dinheiros-core --all-targets
+        run: cargo build --locked -p dinheiros-core --all-targets
 
       - name: cargo test (core)
-        run: cargo test -p dinheiros-core --all-targets
+        run: cargo test --locked -p dinheiros-core --all-targets
 
   check-ui:
     name: check ui (macos)
@@ -50,4 +50,4 @@ jobs:
       # is "does the UI crate still compile against current core?". Full release
       # builds happen in a separate release workflow.
       - name: cargo check (ui + seed binary)
-        run: cargo check --bin dinheiros --bin dinheiros-seed
+        run: cargo check --locked --bin dinheiros --bin dinheiros-seed
