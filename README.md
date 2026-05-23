@@ -26,6 +26,16 @@ The database lives at `~/Library/Application Support/dinheiros/data.db` on macOS
 cargo run --bin dinheiros
 ```
 
+### Demo mode
+
+For screenshots or trying the app without your own broker data:
+
+```bash
+./scripts/run-demo.sh
+```
+
+This seeds `/tmp/dinheiros-demo.db` with a synthetic Brazilian-investor portfolio (B3 stocks, ETFs, Tesouro, IBKR US stocks, BTC, dividends/JCP) and launches the app against it. Your real database at `~/Library/Application Support/dinheiros/data.db` is not touched. Re-running the script regenerates the demo DB from scratch.
+
 ## Build
 
 Produces a release binary at `target/release/dinheiros`:
