@@ -352,11 +352,8 @@ fn test_migration_does_not_delete_correctly_classified_sells() {
     {
         let db = Database::open(&path).unwrap();
         // Mirrors what the new parser writes for a Liquidação Debito.
-        queries::insert_transaction(
-            &db,
-            &make_legacy_sell("BBAS3", Some("Liquidação"), "h1"),
-        )
-        .unwrap();
+        queries::insert_transaction(&db, &make_legacy_sell("BBAS3", Some("Liquidação"), "h1"))
+            .unwrap();
     }
 
     let db = Database::open(&path).unwrap();

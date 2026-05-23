@@ -25,16 +25,18 @@ impl Database {
     }
 
     pub fn list_tables(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-        )?;
-        let names = stmt.query_map([], |row| row.get(0))?
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")?;
+        let names = stmt
+            .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<String>>>()?;
         Ok(names)
     }
 
     pub fn run_migrations(&self) -> Result<()> {
-        self.conn.execute_batch("
+        self.conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS transactions (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 source         TEXT NOT NULL,
@@ -89,7 +91,8 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_daily_prices_date   ON daily_prices(date);
             CREATE INDEX IF NOT EXISTS idx_income_symbol       ON income(symbol);
             CREATE INDEX IF NOT EXISTS idx_income_date         ON income(date);
-        ")?;
+        ",
+        )?;
 
         self.purge_misclassified_transferencia_liquidacao()?;
         Ok(())

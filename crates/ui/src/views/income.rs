@@ -125,17 +125,13 @@ fn render_income_row(ev: &Income) -> Div {
                 .font_weight(FontWeight::MEDIUM)
                 .child(ev.symbol.clone()),
         )
-        .child(
-            div()
-                .w(gpui::px(70.0))
-                .child(ev.source.as_str()),
-        )
+        .child(div().w(gpui::px(70.0)).child(ev.source.as_str()))
         .child(div().w(gpui::px(80.0)).child(type_label))
-        .child(
-            div()
-                .w(gpui::px(100.0))
-                .child(format!("{} {}", ev.currency, format_brl(ev.gross_value))),
-        )
+        .child(div().w(gpui::px(100.0)).child(format!(
+            "{} {}",
+            ev.currency,
+            format_brl(ev.gross_value)
+        )))
         .child(div().w(gpui::px(80.0)).child(tax_str))
         .child(div().w(gpui::px(80.0)).child(origin_str))
         .child(

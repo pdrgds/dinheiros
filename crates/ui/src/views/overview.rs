@@ -34,7 +34,11 @@ fn asset_label(at: &AssetType) -> &'static str {
 }
 
 fn pnl_color(v: f64) -> Rgba {
-    if v >= 0.0 { theme::GREEN } else { theme::RED }
+    if v >= 0.0 {
+        theme::GREEN
+    } else {
+        theme::RED
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +99,11 @@ pub fn render_overview(db: &Database) -> AnyElement {
 // ---------------------------------------------------------------------------
 
 fn render_total(total: f64, invested: f64, pnl: f64) -> Div {
-    let pnl_pct = if invested > 0.0 { pnl / invested * 100.0 } else { 0.0 };
+    let pnl_pct = if invested > 0.0 {
+        pnl / invested * 100.0
+    } else {
+        0.0
+    };
     let pnl_color = if pnl >= 0.0 { theme::GREEN } else { theme::RED };
     let sign = if pnl >= 0.0 { "+" } else { "" };
 
@@ -129,7 +137,10 @@ fn render_total(total: f64, invested: f64, pnl: f64) -> Div {
                         .pb(px(2.0))
                         .child(format!(
                             "{}R$ {} ({}{:.1}%)",
-                            sign, format_brl(pnl.abs()), sign, pnl_pct
+                            sign,
+                            format_brl(pnl.abs()),
+                            sign,
+                            pnl_pct
                         )),
                 ),
         )
@@ -176,15 +187,11 @@ fn render_allocation_panel(allocations: &[Allocation]) -> Div {
                         .rounded_md()
                         .bg(color),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .child(format!(
-                            "{} — {:.1}%",
-                            asset_label(&alloc.asset_type),
-                            alloc.weight
-                        )),
-                ),
+                .child(div().text_sm().child(format!(
+                    "{} — {:.1}%",
+                    asset_label(&alloc.asset_type),
+                    alloc.weight
+                ))),
         );
     }
     panel.child(row)
@@ -274,11 +281,7 @@ fn render_top_holdings(top: &[Position], rest_count: usize, top_weight: f64) -> 
                         .text_color(pnl_color(pnl_pct))
                         .child(format!("{:+.1}%", pnl_pct)),
                 )
-                .child(
-                    div()
-                        .w(gpui::px(55.0))
-                        .child(format!("{:.1}%", weight)),
-                ),
+                .child(div().w(gpui::px(55.0)).child(format!("{:.1}%", weight))),
         );
     }
 
@@ -293,11 +296,7 @@ fn render_top_holdings(top: &[Position], rest_count: usize, top_weight: f64) -> 
                 .py_1()
                 .text_xs()
                 .text_color(theme::TEXT_SECONDARY)
-                .child(
-                    div()
-                        .flex_1()
-                        .child(format!("+ {} others", rest_count)),
-                )
+                .child(div().flex_1().child(format!("+ {} others", rest_count)))
                 .child(div().w(gpui::px(90.0)))
                 .child(div().w(gpui::px(70.0)))
                 .child(

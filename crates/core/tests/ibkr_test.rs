@@ -31,18 +31,16 @@ fn test_parse_ibkr_dividend_description_longer_decimal() {
 
 #[test]
 fn test_parse_ibkr_tax_description() {
-    let (sym, origin) = parse_tax_description(
-        "NVO(US6701002056) Cash Dividend USD 0.516901 per Share - DK Tax",
-    );
+    let (sym, origin) =
+        parse_tax_description("NVO(US6701002056) Cash Dividend USD 0.516901 per Share - DK Tax");
     assert_eq!(sym, "NVO");
     assert_eq!(origin, "DK");
 }
 
 #[test]
 fn test_parse_ibkr_tax_description_us() {
-    let (sym, origin) = parse_tax_description(
-        "RILY(US05580M1080) Cash Dividend USD 0.50 per Share - US Tax",
-    );
+    let (sym, origin) =
+        parse_tax_description("RILY(US05580M1080) Cash Dividend USD 0.50 per Share - US Tax");
     assert_eq!(sym, "RILY");
     assert_eq!(origin, "US");
 }

@@ -87,13 +87,19 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
                             brl_rate: 1.0,
                         },
                     ) {
-                        eprintln!("[reconcile] warning: failed to store Tesouro price for {}: {}", symbol, e);
+                        eprintln!(
+                            "[reconcile] warning: failed to store Tesouro price for {}: {}",
+                            symbol, e
+                        );
                     } else {
                         count += 1;
                     }
                 }
                 Err(e) => {
-                    eprintln!("[reconcile] warning: failed to fetch Tesouro price for {}: {}", symbol, e);
+                    eprintln!(
+                        "[reconcile] warning: failed to fetch Tesouro price for {}: {}",
+                        symbol, e
+                    );
                 }
             }
             continue;
@@ -104,7 +110,10 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
         let price = match yahoo::fetch_current_price(&yahoo_sym).await {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[reconcile] warning: failed to fetch price for {}: {}", symbol, e);
+                eprintln!(
+                    "[reconcile] warning: failed to fetch price for {}: {}",
+                    symbol, e
+                );
                 continue;
             }
         };
@@ -134,7 +143,10 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
                 brl_rate,
             },
         ) {
-            eprintln!("[reconcile] warning: failed to store price for {}: {}", symbol, e);
+            eprintln!(
+                "[reconcile] warning: failed to store price for {}: {}",
+                symbol, e
+            );
             continue;
         }
 
@@ -161,7 +173,10 @@ pub async fn fetch_current_prices(db: &Database) -> Result<usize, Box<dyn std::e
                             brl_rate: 1.0,
                         },
                     ) {
-                        eprintln!("[reconcile] warning: failed to store crypto price for {}: {}", symbol, e);
+                        eprintln!(
+                            "[reconcile] warning: failed to store crypto price for {}: {}",
+                            symbol, e
+                        );
                     } else {
                         count += 1;
                     }
@@ -194,7 +209,11 @@ pub async fn backfill_prices(db: &Database) -> Result<ReconcileResult, Box<dyn s
             "SELECT DISTINCT symbol, asset_type, currency FROM transactions WHERE asset_type = 'tesouro'"
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         rows.filter_map(|r| r.ok()).collect()
     };
@@ -238,7 +257,10 @@ async fn backfill_crypto(
     for (symbol, asset_type, _currency) in symbols {
         let (start, end, missing) = match backfill_date_range(db, symbol, asset_type, today) {
             Ok(Some(plan)) => plan,
-            Ok(None) => { symbols_up_to_date += 1; continue; }
+            Ok(None) => {
+                symbols_up_to_date += 1;
+                continue;
+            }
             Err(_) => continue,
         };
 
@@ -249,10 +271,18 @@ async fn backfill_crypto(
                     if !missing.contains(date) {
                         continue;
                     }
-                    if queries::upsert_daily_price(db, &DailyPrice {
-                        symbol: symbol.clone(), date: *date, close_price: *price,
-                        currency: "BRL".to_string(), brl_rate: 1.0,
-                    }).is_ok() {
+                    if queries::upsert_daily_price(
+                        db,
+                        &DailyPrice {
+                            symbol: symbol.clone(),
+                            date: *date,
+                            close_price: *price,
+                            currency: "BRL".to_string(),
+                            brl_rate: 1.0,
+                        },
+                    )
+                    .is_ok()
+                    {
                         prices_backfilled += 1;
                     }
                 }
@@ -282,7 +312,10 @@ async fn backfill_stocks(
     for (symbol, asset_type, currency) in symbols {
         let (start, end, missing) = match backfill_date_range(db, symbol, asset_type, today) {
             Ok(Some(plan)) => plan,
-            Ok(None) => { symbols_up_to_date += 1; continue; }
+            Ok(None) => {
+                symbols_up_to_date += 1;
+                continue;
+            }
             Err(_) => continue,
         };
 
@@ -306,7 +339,10 @@ async fn backfill_stocks(
                     if is_rate_limited(&e) {
                         return (prices_backfilled, symbols_failed, symbols_up_to_date, true);
                     }
-                    eprintln!("[reconcile] PTAX failed for {} ({}): {}", currency, symbol, e);
+                    eprintln!(
+                        "[reconcile] PTAX failed for {} ({}): {}",
+                        currency, symbol, e
+                    );
                     continue;
                 }
             }
@@ -327,10 +363,18 @@ async fn backfill_stocks(
                 1.0
             };
 
-            if queries::upsert_daily_price(db, &DailyPrice {
-                symbol: symbol.clone(), date: *date, close_price: *close_price,
-                currency: currency.clone(), brl_rate,
-            }).is_ok() {
+            if queries::upsert_daily_price(
+                db,
+                &DailyPrice {
+                    symbol: symbol.clone(),
+                    date: *date,
+                    close_price: *close_price,
+                    currency: currency.clone(),
+                    brl_rate,
+                },
+            )
+            .is_ok()
+            {
                 prices_backfilled += 1;
             }
         }
@@ -412,8 +456,8 @@ async fn backfill_tesouro(
 
             let tipo = fields[0];
             let vencimento = fields[1]; // dd/mm/yyyy
-            let data_base = fields[2];  // dd/mm/yyyy
-            let pu_venda = fields[6];   // "PU Venda Manha" - sell price
+            let data_base = fields[2]; // dd/mm/yyyy
+            let pu_venda = fields[6]; // "PU Venda Manha" - sell price
 
             // Match bond type and maturity year
             if !tipo.starts_with(&search_type) {
@@ -507,8 +551,7 @@ fn backfill_date_range(
             .collect()
     };
 
-    let missing_vec =
-        calendar::missing_trading_days(first_tx_date, today, asset_type, &present);
+    let missing_vec = calendar::missing_trading_days(first_tx_date, today, asset_type, &present);
     if missing_vec.is_empty() {
         return Ok(None);
     }
@@ -578,8 +621,11 @@ mod tests {
         let first_tx = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 4, 17).unwrap();
 
-        queries::insert_transaction(&db, &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl))
-            .unwrap();
+        queries::insert_transaction(
+            &db,
+            &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl),
+        )
+        .unwrap();
 
         // Cover the prefix and one late day, but leave Apr 7–10, 13–14, 16–17 missing.
         for (m, d) in [(4, 1), (4, 2), (4, 6), (4, 15)] {
@@ -600,7 +646,14 @@ mod tests {
         // what callers gate the prices_backfilled counter on so re-upserting a
         // dense fetch doesn't keep the worker looping forever.
         let expected: HashSet<NaiveDate> = [
-            (4, 7), (4, 8), (4, 9), (4, 10), (4, 13), (4, 14), (4, 16), (4, 17),
+            (4, 7),
+            (4, 8),
+            (4, 9),
+            (4, 10),
+            (4, 13),
+            (4, 14),
+            (4, 16),
+            (4, 17),
         ]
         .iter()
         .map(|(m, d)| NaiveDate::from_ymd_opt(2026, *m, *d).unwrap())
@@ -614,8 +667,11 @@ mod tests {
         let first_tx = NaiveDate::from_ymd_opt(2026, 4, 13).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 4, 17).unwrap();
 
-        queries::insert_transaction(&db, &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl))
-            .unwrap();
+        queries::insert_transaction(
+            &db,
+            &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl),
+        )
+        .unwrap();
         for d in 13..=17 {
             queries::upsert_daily_price(
                 &db,
@@ -636,8 +692,11 @@ mod tests {
         let first_tx = NaiveDate::from_ymd_opt(2026, 4, 13).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 4, 19).unwrap(); // Sunday
 
-        queries::insert_transaction(&db, &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl))
-            .unwrap();
+        queries::insert_transaction(
+            &db,
+            &mk_tx("KULR", first_tx, crate::types::AssetType::StockIntl),
+        )
+        .unwrap();
         // Only the bogus Sunday row exists — every weekday in between is missing.
         queries::upsert_daily_price(&db, &mk_price("KULR", today)).unwrap();
 
@@ -656,8 +715,11 @@ mod tests {
         let first_tx = NaiveDate::from_ymd_opt(2026, 4, 13).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 4, 19).unwrap();
 
-        queries::insert_transaction(&db, &mk_tx("BTC", first_tx, crate::types::AssetType::Crypto))
-            .unwrap();
+        queries::insert_transaction(
+            &db,
+            &mk_tx("BTC", first_tx, crate::types::AssetType::Crypto),
+        )
+        .unwrap();
         // Have only the first and last days; middle 5 (incl. Sat/Sun) are missing for crypto.
         queries::upsert_daily_price(&db, &mk_price("BTC", first_tx)).unwrap();
         queries::upsert_daily_price(&db, &mk_price("BTC", today)).unwrap();

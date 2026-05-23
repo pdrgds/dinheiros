@@ -132,12 +132,9 @@ pub fn render_history(
                 .bg(theme::BG_SECONDARY)
                 .border_1()
                 .border_color(theme::BORDER)
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme::TEXT_SECONDARY)
-                        .child("Not enough data for chart. Prices are being backfilled in the background."),
-                )
+                .child(div().text_sm().text_color(theme::TEXT_SECONDARY).child(
+                    "Not enough data for chart. Prices are being backfilled in the background.",
+                ))
                 .into_any_element()
         })
         .child(render_backfill_status(db))
@@ -149,8 +146,16 @@ pub fn render_history(
 // ---------------------------------------------------------------------------
 
 fn render_split_toggle(active: bool, cx: &mut Context<AppRoot>) -> gpui::Stateful<Div> {
-    let bg = if active { theme::ACCENT } else { theme::BG_SECONDARY };
-    let text_col = if active { rgb(0xffffff) } else { theme::TEXT_SECONDARY };
+    let bg = if active {
+        theme::ACCENT
+    } else {
+        theme::BG_SECONDARY
+    };
+    let text_col = if active {
+        rgb(0xffffff)
+    } else {
+        theme::TEXT_SECONDARY
+    };
     div()
         .id("split-toggle")
         .px_3()
@@ -172,8 +177,16 @@ fn render_range_selector(active: TimeRange, cx: &mut Context<AppRoot>) -> Div {
     let mut row = div().flex().flex_row().gap_1();
     for &range in &TimeRange::ALL {
         let is_active = range == active;
-        let bg = if is_active { theme::ACCENT } else { theme::BG_SECONDARY };
-        let text_col = if is_active { rgb(0xffffff) } else { theme::TEXT_SECONDARY };
+        let bg = if is_active {
+            theme::ACCENT
+        } else {
+            theme::BG_SECONDARY
+        };
+        let text_col = if is_active {
+            rgb(0xffffff)
+        } else {
+            theme::TEXT_SECONDARY
+        };
         row = row.child(
             div()
                 .id(SharedString::from(format!("range-{:?}", range)))
@@ -215,7 +228,11 @@ fn render_value_summary(points: &[(NaiveDate, f64)]) -> Div {
         0.0
     };
 
-    let change_color = if change >= 0.0 { theme::GREEN } else { theme::RED };
+    let change_color = if change >= 0.0 {
+        theme::GREEN
+    } else {
+        theme::RED
+    };
     let sign = if change >= 0.0 { "+" } else { "" };
     let date_str = latest_date
         .map(|d| d.format("%d %b %Y").to_string())
@@ -266,7 +283,10 @@ fn render_chart_with_axes(points: &[(NaiveDate, f64)]) -> AnyElement {
     }
 
     let min_val = points.iter().map(|(_, v)| *v).fold(f64::INFINITY, f64::min);
-    let max_val = points.iter().map(|(_, v)| *v).fold(f64::NEG_INFINITY, f64::max);
+    let max_val = points
+        .iter()
+        .map(|(_, v)| *v)
+        .fold(f64::NEG_INFINITY, f64::max);
     let range = (max_val - min_val).max(1.0);
     let y_min = min_val - range * 0.05;
     let y_max = max_val + range * 0.05;
@@ -287,7 +307,11 @@ fn render_chart_with_axes(points: &[(NaiveDate, f64)]) -> AnyElement {
     let x_label_count = 5.min(n);
     let x_labels: Vec<String> = (0..x_label_count)
         .map(|i| {
-            let idx = if x_label_count <= 1 { 0 } else { i * (n - 1) / (x_label_count - 1) };
+            let idx = if x_label_count <= 1 {
+                0
+            } else {
+                i * (n - 1) / (x_label_count - 1)
+            };
             points[idx].0.format("%b %y").to_string()
         })
         .collect();
@@ -310,7 +334,11 @@ fn render_chart_with_axes(points: &[(NaiveDate, f64)]) -> AnyElement {
                         .h(px(300.0))
                         .pr_2()
                         .children(y_labels.into_iter().map(|label| {
-                            div().text_xs().text_color(theme::TEXT_SECONDARY).text_right().child(label)
+                            div()
+                                .text_xs()
+                                .text_color(theme::TEXT_SECONDARY)
+                                .text_right()
+                                .child(label)
                         })),
                 )
                 .child(
@@ -340,7 +368,10 @@ fn render_chart_with_axes(points: &[(NaiveDate, f64)]) -> AnyElement {
                 .justify_between()
                 .pt_1()
                 .children(x_labels.into_iter().map(|label| {
-                    div().text_xs().text_color(theme::TEXT_SECONDARY).child(label)
+                    div()
+                        .text_xs()
+                        .text_color(theme::TEXT_SECONDARY)
+                        .child(label)
                 })),
         )
         .into_any_element()
@@ -362,19 +393,18 @@ fn paint_chart(bounds: Bounds<Pixels>, points: &[(NaiveDate, f64)], window: &mut
     let chart_h = bounds.size.height - pad * 2.0;
 
     let min_val = points.iter().map(|(_, v)| *v).fold(f64::INFINITY, f64::min);
-    let max_val = points.iter().map(|(_, v)| *v).fold(f64::NEG_INFINITY, f64::max);
+    let max_val = points
+        .iter()
+        .map(|(_, v)| *v)
+        .fold(f64::NEG_INFINITY, f64::max);
     let range = (max_val - min_val).max(1.0);
     let y_min = min_val - range * 0.05;
     let y_max = max_val + range * 0.05;
     let y_range = y_max - y_min;
     let n = points.len();
 
-    let to_px_x = |i: usize| -> Pixels {
-        chart_x + chart_w * (i as f32 / (n - 1).max(1) as f32)
-    };
-    let to_px_y = |v: f64| -> Pixels {
-        chart_y + chart_h * (1.0 - ((v - y_min) / y_range) as f32)
-    };
+    let to_px_x = |i: usize| -> Pixels { chart_x + chart_w * (i as f32 / (n - 1).max(1) as f32) };
+    let to_px_y = |v: f64| -> Pixels { chart_y + chart_h * (1.0 - ((v - y_min) / y_range) as f32) };
 
     // Grid lines
     for i in 0..=4 {
@@ -425,7 +455,10 @@ fn render_multi_chart(
     }
 
     // Find global max across all series for Y-axis scaling
-    let max_val = total_points.iter().map(|(_, v)| *v).fold(f64::NEG_INFINITY, f64::max);
+    let max_val = total_points
+        .iter()
+        .map(|(_, v)| *v)
+        .fold(f64::NEG_INFINITY, f64::max);
     let y_max = max_val * 1.05;
 
     let y_labels: Vec<String> = (0..=4)
@@ -444,7 +477,11 @@ fn render_multi_chart(
     let x_label_count = 5.min(n);
     let x_labels: Vec<String> = (0..x_label_count)
         .map(|i| {
-            let idx = if x_label_count <= 1 { 0 } else { i * (n - 1) / (x_label_count - 1) };
+            let idx = if x_label_count <= 1 {
+                0
+            } else {
+                i * (n - 1) / (x_label_count - 1)
+            };
             total_points[idx].0.format("%b %y").to_string()
         })
         .collect();
@@ -484,7 +521,12 @@ fn render_multi_chart(
                 .items_center()
                 .gap_1()
                 .child(div().w(px(10.0)).h(px(3.0)).bg(color))
-                .child(div().text_xs().text_color(theme::TEXT_SECONDARY).child(label.to_string()))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::TEXT_SECONDARY)
+                        .child(label.to_string()),
+                )
         }));
 
     div()
@@ -504,7 +546,11 @@ fn render_multi_chart(
                         .h(px(300.0))
                         .pr_2()
                         .children(y_labels.into_iter().map(|label| {
-                            div().text_xs().text_color(theme::TEXT_SECONDARY).text_right().child(label)
+                            div()
+                                .text_xs()
+                                .text_color(theme::TEXT_SECONDARY)
+                                .text_right()
+                                .child(label)
                         })),
                 )
                 .child(
@@ -534,7 +580,10 @@ fn render_multi_chart(
                 .justify_between()
                 .pt_1()
                 .children(x_labels.into_iter().map(|label| {
-                    div().text_xs().text_color(theme::TEXT_SECONDARY).child(label)
+                    div()
+                        .text_xs()
+                        .text_color(theme::TEXT_SECONDARY)
+                        .child(label)
                 })),
         )
         .into_any_element()
@@ -553,12 +602,9 @@ fn paint_multi_chart(
     let chart_w = bounds.size.width - pad * 2.0;
     let chart_h = bounds.size.height - pad * 2.0;
 
-    let to_px_x = |i: usize| -> Pixels {
-        chart_x + chart_w * (i as f32 / (n_total - 1).max(1) as f32)
-    };
-    let to_px_y = |v: f64| -> Pixels {
-        chart_y + chart_h * (1.0 - (v / y_max) as f32)
-    };
+    let to_px_x =
+        |i: usize| -> Pixels { chart_x + chart_w * (i as f32 / (n_total - 1).max(1) as f32) };
+    let to_px_y = |v: f64| -> Pixels { chart_y + chart_h * (1.0 - (v / y_max) as f32) };
 
     // Grid lines
     for i in 0..=4 {
@@ -717,7 +763,10 @@ fn render_backfill_status(db: &Database) -> AnyElement {
                         .text_color(theme::TEXT_SECONDARY)
                         .child(format!(
                             "{:.0}% — {} of ~{} data points across {} symbols",
-                            pct, total_have, total_needed, backfillable.len()
+                            pct,
+                            total_have,
+                            total_needed,
+                            backfillable.len()
                         )),
                 ),
         )
@@ -757,8 +806,10 @@ struct HistorySeries {
 
 fn compute_history_data_by_category(db: &Database) -> HistorySeries {
     let empty = HistorySeries {
-        total: BTreeMap::new(), stocks: BTreeMap::new(),
-        tesouro: BTreeMap::new(), crypto: BTreeMap::new(),
+        total: BTreeMap::new(),
+        stocks: BTreeMap::new(),
+        tesouro: BTreeMap::new(),
+        crypto: BTreeMap::new(),
     };
 
     let transactions = match dinheiros_core::db::queries::get_all_transactions(db) {
@@ -811,14 +862,19 @@ fn compute_history_data_by_category(db: &Database) -> HistorySeries {
         }
         for ((symbol, date), (bought, sold)) in &by_sym_date {
             if *sold > 10.0 && *bought > 0.1 && (*sold / *bought > 1.5 || *bought / *sold > 1.5) {
-                split_adjustments.entry(symbol.clone()).or_default().push((*date, *bought / *sold));
+                split_adjustments
+                    .entry(symbol.clone())
+                    .or_default()
+                    .push((*date, *bought / *sold));
             }
         }
     }
 
     let mut result = HistorySeries {
-        total: BTreeMap::new(), stocks: BTreeMap::new(),
-        tesouro: BTreeMap::new(), crypto: BTreeMap::new(),
+        total: BTreeMap::new(),
+        stocks: BTreeMap::new(),
+        tesouro: BTreeMap::new(),
+        crypto: BTreeMap::new(),
     };
 
     for date in &dates {
@@ -908,9 +964,9 @@ fn get_all_price_dates(db: &Database) -> Result<Vec<NaiveDate>, Box<dyn std::err
 fn get_all_daily_prices(
     db: &Database,
 ) -> Result<Vec<(String, NaiveDate, f64)>, Box<dyn std::error::Error>> {
-    let mut stmt = db.conn().prepare(
-        "SELECT symbol, date, close_price * brl_rate FROM daily_prices ORDER BY date",
-    )?;
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT symbol, date, close_price * brl_rate FROM daily_prices ORDER BY date")?;
     let rows = stmt.query_map(params![], |row| {
         let symbol: String = row.get(0)?;
         let date_str: String = row.get(1)?;

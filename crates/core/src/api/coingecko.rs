@@ -33,7 +33,11 @@ fn build_client() -> reqwest::Client {
 /// Fetch current BTC/BRL price.
 pub async fn fetch_btc_brl_current() -> Result<f64, Box<dyn std::error::Error>> {
     let client = build_client();
-    let resp = client.get(SIMPLE_PRICE_URL).send().await?.error_for_status()?;
+    let resp = client
+        .get(SIMPLE_PRICE_URL)
+        .send()
+        .await?
+        .error_for_status()?;
     let parsed: SimplePriceResponse = resp.json().await?;
     Ok(parsed.bitcoin.brl)
 }
@@ -48,16 +52,8 @@ pub async fn fetch_btc_brl_history(
     let client = build_client();
     let mut results: BTreeMap<NaiveDate, f64> = BTreeMap::new();
 
-    let mut start_ms = from
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc()
-        .timestamp() * 1000;
-    let end_ms = to
-        .and_hms_opt(23, 59, 59)
-        .unwrap()
-        .and_utc()
-        .timestamp() * 1000;
+    let mut start_ms = from.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp() * 1000;
+    let end_ms = to.and_hms_opt(23, 59, 59).unwrap().and_utc().timestamp() * 1000;
 
     // Binance returns max 1000 candles per request — paginate
     loop {
@@ -93,7 +89,8 @@ pub async fn fetch_btc_brl_history(
         }
 
         // Next page: start after the last candle's close time
-        let last_close_time = candles.last()
+        let last_close_time = candles
+            .last()
             .and_then(|c| c.get(6))
             .and_then(|v| v.as_i64())
             .unwrap_or(end_ms);

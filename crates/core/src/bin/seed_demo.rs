@@ -41,8 +41,7 @@ fn main() {
 
     let db = Database::open(&path)
         .unwrap_or_else(|e| panic!("failed to open {}: {}", path.display(), e));
-    let summary = seed_demo(&db)
-        .unwrap_or_else(|e| panic!("seed failed: {}", e));
+    let summary = seed_demo(&db).unwrap_or_else(|e| panic!("seed failed: {}", e));
 
     println!(
         "seeded {}: {} transactions, {} income, {} daily_prices",

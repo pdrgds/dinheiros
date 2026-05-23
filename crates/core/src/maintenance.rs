@@ -8,9 +8,7 @@ use crate::db::Database;
 /// `fetch_current_prices` that upserted "today" even on weekends/holidays.
 ///
 /// Returns the number of rows deleted. Safe to run repeatedly (idempotent).
-pub fn cleanup_non_trading_day_prices(
-    db: &Database,
-) -> Result<usize, Box<dyn std::error::Error>> {
+pub fn cleanup_non_trading_day_prices(db: &Database) -> Result<usize, Box<dyn std::error::Error>> {
     let symbol_asset_types: Vec<(String, String)> = {
         let mut stmt = db
             .conn()

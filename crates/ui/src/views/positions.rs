@@ -37,9 +37,19 @@ pub enum SortColumn {
 
 impl SortColumn {
     pub const ALL: [SortColumn; 13] = [
-        Self::Symbol, Self::Type, Self::Currency, Self::Qty,
-        Self::AvgCost, Self::AvgCostBrl, Self::Price, Self::ValueOrig,
-        Self::PlOrig, Self::PlBrl, Self::PlPct, Self::ValueBrl, Self::Weight,
+        Self::Symbol,
+        Self::Type,
+        Self::Currency,
+        Self::Qty,
+        Self::AvgCost,
+        Self::AvgCostBrl,
+        Self::Price,
+        Self::ValueOrig,
+        Self::PlOrig,
+        Self::PlBrl,
+        Self::PlPct,
+        Self::ValueBrl,
+        Self::Weight,
     ];
 
     fn label(&self) -> &'static str {
@@ -143,7 +153,11 @@ fn asset_label(at: &AssetType) -> &'static str {
 }
 
 fn pnl_color(v: f64) -> Rgba {
-    if v >= 0.0 { theme::GREEN } else { theme::RED }
+    if v >= 0.0 {
+        theme::GREEN
+    } else {
+        theme::RED
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +187,10 @@ pub fn render_positions(
         });
     }
 
-    let table = app.positions_table.as_ref().expect("just initialised above");
+    let table = app
+        .positions_table
+        .as_ref()
+        .expect("just initialised above");
 
     div()
         .flex()
@@ -190,17 +207,12 @@ pub fn render_positions(
                 .child(format!("All Positions ({})", count)),
         )
         .child(
-            div()
-                .flex_1()
-                .overflow_hidden()
-                .text_xs()
-                .px_6()
-                .child(
-                    DataTable::new(table)
-                        .with_size(Size::XSmall)
-                        .stripe(false)
-                        .bordered(false),
-                ),
+            div().flex_1().overflow_hidden().text_xs().px_6().child(
+                DataTable::new(table)
+                    .with_size(Size::XSmall)
+                    .stripe(false)
+                    .bordered(false),
+            ),
         )
         .into_any_element()
 }
@@ -210,19 +222,31 @@ fn sort_positions(positions: &mut [Position], sort: SortState) {
         SortColumn::Symbol => {
             positions.sort_by(|a, b| {
                 let cmp = a.symbol.cmp(&b.symbol);
-                if sort.ascending { cmp } else { cmp.reverse() }
+                if sort.ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         SortColumn::Type => {
             positions.sort_by(|a, b| {
                 let cmp = asset_label(&a.asset_type).cmp(asset_label(&b.asset_type));
-                if sort.ascending { cmp } else { cmp.reverse() }
+                if sort.ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         SortColumn::Currency => {
             positions.sort_by(|a, b| {
                 let cmp = a.currency.cmp(&b.currency);
-                if sort.ascending { cmp } else { cmp.reverse() }
+                if sort.ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         _ => {
@@ -230,7 +254,11 @@ fn sort_positions(positions: &mut [Position], sort: SortState) {
                 let ka = sort.column.sort_key(a);
                 let kb = sort.column.sort_key(b);
                 let cmp = ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal);
-                if sort.ascending { cmp } else { cmp.reverse() }
+                if sort.ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
     }
@@ -248,12 +276,20 @@ fn render_header_row(sort: SortState, cx: &mut Context<AppRoot>) -> AnyElement {
     for &col in &SortColumn::ALL {
         let is_active = sort.column == col;
         let arrow = if is_active {
-            if sort.ascending { " \u{25B2}" } else { " \u{25BC}" }
+            if sort.ascending {
+                " \u{25B2}"
+            } else {
+                " \u{25BC}"
+            }
         } else {
             ""
         };
         let label = format!("{}{}", col.label(), arrow);
-        let text_col = if is_active { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+        let text_col = if is_active {
+            theme::TEXT_PRIMARY
+        } else {
+            theme::TEXT_SECONDARY
+        };
 
         row = row.child(
             div()
@@ -278,7 +314,6 @@ fn render_header_row(sort: SortState, cx: &mut Context<AppRoot>) -> AnyElement {
 
     row.into_any_element()
 }
-
 
 fn row_base() -> Div {
     div()
@@ -309,7 +344,11 @@ fn render_position_row(
     let is_selected = selected == Some(ix);
     let ccy = currency_symbol(&pos.currency);
 
-    let bg = if is_selected { theme::BG_SECONDARY } else { theme::BG_PRIMARY };
+    let bg = if is_selected {
+        theme::BG_SECONDARY
+    } else {
+        theme::BG_PRIMARY
+    };
 
     let entity = entity.clone();
     row_base()
@@ -327,23 +366,55 @@ fn render_position_row(
                 cx.notify();
             });
         })
-        .child(cell(SortColumn::Symbol).font_weight(FontWeight::MEDIUM).truncate().child(pos.symbol.clone()))
-        .child(cell(SortColumn::Type).text_color(asset_color(&pos.asset_type)).child(asset_label(&pos.asset_type)))
-        .child(cell(SortColumn::Currency).text_color(theme::TEXT_SECONDARY).child(pos.currency.clone()))
+        .child(
+            cell(SortColumn::Symbol)
+                .font_weight(FontWeight::MEDIUM)
+                .truncate()
+                .child(pos.symbol.clone()),
+        )
+        .child(
+            cell(SortColumn::Type)
+                .text_color(asset_color(&pos.asset_type))
+                .child(asset_label(&pos.asset_type)),
+        )
+        .child(
+            cell(SortColumn::Currency)
+                .text_color(theme::TEXT_SECONDARY)
+                .child(pos.currency.clone()),
+        )
         .child(cell(SortColumn::Qty).child(format_qty(pos.quantity)))
         .child(cell(SortColumn::AvgCost).child(format!("{} {}", ccy, format_brl(pos.avg_cost))))
         .child(cell(SortColumn::AvgCostBrl).child(format!("R$ {}", format_brl(pos.avg_cost_brl))))
         .child(cell(SortColumn::Price).child(format!("{} {}", ccy, format_brl(price))))
-        .child(cell(SortColumn::ValueOrig).child(format!("{} {}", ccy, format_brl(price * pos.quantity))))
-        .child(cell(SortColumn::PlOrig).text_color(pnl_color(pnl_orig)).child(format!("{} {:+}", ccy, format_brl(pnl_orig))))
-        .child(cell(SortColumn::PlBrl).text_color(pnl_color(pnl_brl)).child(format!("R$ {:+}", format_brl(pnl_brl))))
-        .child(cell(SortColumn::PlPct).text_color(pnl_color(pnl_pct)).child(format!("{:+.1}%", pnl_pct)))
+        .child(cell(SortColumn::ValueOrig).child(format!(
+            "{} {}",
+            ccy,
+            format_brl(price * pos.quantity)
+        )))
+        .child(
+            cell(SortColumn::PlOrig)
+                .text_color(pnl_color(pnl_orig))
+                .child(format!("{} {:+}", ccy, format_brl(pnl_orig))),
+        )
+        .child(
+            cell(SortColumn::PlBrl)
+                .text_color(pnl_color(pnl_brl))
+                .child(format!("R$ {:+}", format_brl(pnl_brl))),
+        )
+        .child(
+            cell(SortColumn::PlPct)
+                .text_color(pnl_color(pnl_pct))
+                .child(format!("{:+.1}%", pnl_pct)),
+        )
         .child(cell(SortColumn::ValueBrl).child(format!("R$ {}", format_brl(value_brl))))
         .child(cell(SortColumn::Weight).child(format!("{:.1}%", weight)))
 }
 
 fn cell(col: SortColumn) -> Div {
-    div().w(gpui::px(col.width())).overflow_hidden().whitespace_nowrap()
+    div()
+        .w(gpui::px(col.width()))
+        .overflow_hidden()
+        .whitespace_nowrap()
 }
 
 fn currency_symbol(code: &str) -> &'static str {
@@ -399,7 +470,11 @@ impl PositionsTableDelegate {
         );
         apply_sort(&mut positions, sort);
         let column_widths = compute_column_widths(&positions);
-        Self { positions, column_widths, sort }
+        Self {
+            positions,
+            column_widths,
+            sort,
+        }
     }
 
     pub fn update_data(&mut self, mut positions: Vec<Position>) {
@@ -418,7 +493,13 @@ fn apply_sort(positions: &mut [Position], (col_ix, direction): (usize, ColumnSor
         ColumnSort::Default => return,
     };
     let sc = SortColumn::ALL[col_ix];
-    sort_positions(positions, SortState { column: sc, ascending });
+    sort_positions(
+        positions,
+        SortState {
+            column: sc,
+            ascending,
+        },
+    );
 }
 
 /// Display form of a symbol for the Positions table.
@@ -512,9 +593,13 @@ impl TableDelegate for PositionsTableDelegate {
 
     fn column(&self, col_ix: usize, _: &gpui::App) -> Column {
         let sc = SortColumn::ALL[col_ix];
-        let width = self.column_widths.get(col_ix).copied().unwrap_or(sc.width());
-        let mut col = Column::new(SharedString::from(format!("{:?}", sc)), sc.label())
-            .width(px(width));
+        let width = self
+            .column_widths
+            .get(col_ix)
+            .copied()
+            .unwrap_or(sc.width());
+        let mut col =
+            Column::new(SharedString::from(format!("{:?}", sc)), sc.label()).width(px(width));
         // Mark the active sort column with its direction; leave others as plain
         // sortable so clicking still works.
         col = if self.sort.0 == col_ix {
@@ -618,7 +703,9 @@ impl TableDelegate for PositionsTableDelegate {
                 .text_color(theme::TEXT_SECONDARY)
                 .child(pos.currency.clone())
                 .into_any_element(),
-            SortColumn::Qty => cell(div()).child(format_qty(pos.quantity)).into_any_element(),
+            SortColumn::Qty => cell(div())
+                .child(format_qty(pos.quantity))
+                .into_any_element(),
             SortColumn::AvgCost => cell(div())
                 .child(format!("{} {}", ccy, format_brl(pos.avg_cost)))
                 .into_any_element(),

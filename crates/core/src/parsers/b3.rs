@@ -15,8 +15,7 @@ pub struct B3ImportResult {
 pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::Error>> {
     let mut workbook: Xlsx<_> = open_workbook(path)?;
 
-    let sheet = workbook
-        .worksheet_range("Movimentação")?;
+    let sheet = workbook.worksheet_range("Movimentação")?;
 
     let mut transactions = Vec::new();
     let mut income = Vec::new();
@@ -114,7 +113,11 @@ pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::
             // "Transferência - Liquidação" so the cleanup migration's exact-
             // match DELETE doesn't grab freshly-imported rows on next startup.
             "Transferência - Liquidação" => {
-                let tx_type = if is_credito { TxType::Buy } else { TxType::Sell };
+                let tx_type = if is_credito {
+                    TxType::Buy
+                } else {
+                    TxType::Sell
+                };
                 transactions.push(priced_trade(tx_type, Some("Liquidação")));
             }
 
@@ -135,7 +138,11 @@ pub fn parse_b3_xlsx(path: &Path) -> Result<B3ImportResult, Box<dyn std::error::
             // Fractional residual from a corporate action: Credito adds shares,
             // Debito removes them (typically <1 share rounding).
             "Fração em Ativos" => {
-                let tx_type = if is_credito { TxType::Buy } else { TxType::Sell };
+                let tx_type = if is_credito {
+                    TxType::Buy
+                } else {
+                    TxType::Sell
+                };
                 transactions.push(unpriced_movement(tx_type, "Fração em Ativos"));
             }
 
@@ -232,8 +239,17 @@ fn cell_f64(cell: &Data) -> f64 {
     }
 }
 
-fn make_import_hash(date: &str, movimentacao: &str, produto: &str, quantidade: f64, preco_unitario: f64) -> String {
-    let input = format!("b3:{}:{}:{}:{}:{}", date, movimentacao, produto, quantidade, preco_unitario);
+fn make_import_hash(
+    date: &str,
+    movimentacao: &str,
+    produto: &str,
+    quantidade: f64,
+    preco_unitario: f64,
+) -> String {
+    let input = format!(
+        "b3:{}:{}:{}:{}:{}",
+        date, movimentacao, produto, quantidade, preco_unitario
+    );
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
     hex::encode(hasher.finalize())

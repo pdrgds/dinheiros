@@ -9,9 +9,7 @@ use crate::db::queries;
 use crate::db::Database;
 use crate::types::ExportData;
 
-const KNOWN_CONFIG_KEYS: &[&str] = &[
-    "coingecko_api_key",
-];
+const KNOWN_CONFIG_KEYS: &[&str] = &["coingecko_api_key"];
 
 const PRICE_DATE_MIN: &str = "2000-01-01";
 const PRICE_DATE_MAX: &str = "2099-12-31";

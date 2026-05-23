@@ -117,7 +117,9 @@ pub fn trading_days(first: NaiveDate, last: NaiveDate, asset_type: &str) -> i64 
 
     let holidays: HashSet<NaiveDate> = match asset_type {
         "stock_br" => (first.year()..=last.year()).flat_map(b3_holidays).collect(),
-        "stock_intl" => (first.year()..=last.year()).flat_map(nyse_holidays).collect(),
+        "stock_intl" => (first.year()..=last.year())
+            .flat_map(nyse_holidays)
+            .collect(),
         _ => HashSet::new(),
     };
 

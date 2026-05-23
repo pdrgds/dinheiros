@@ -63,6 +63,7 @@ pub fn write_b3_sample_xlsx(dir: &Path) -> PathBuf {
     let cdb = "CDB 110% CDI Banco Inter";
     let inst = "DEMO BROKER";
 
+    #[rustfmt::skip]
     let rows: Vec<(&str, &str, &str, &str, f64, f64, f64)> = vec![
         ("Debito",  "15/01/2024", "Compra",                      petr4,   100.0,  35.00,   3500.00),
         ("Credito", "20/06/2024", "Venda",                       petr4,    50.0,  38.00,   1900.00),
@@ -83,9 +84,14 @@ pub fn write_b3_sample_xlsx(dir: &Path) -> PathBuf {
     ];
 
     let mut workbook = Workbook::new();
-    let sheet = workbook.add_worksheet().set_name("Movimentação").expect("set sheet name");
+    let sheet = workbook
+        .add_worksheet()
+        .set_name("Movimentação")
+        .expect("set sheet name");
     for (col, h) in header.iter().enumerate() {
-        sheet.write_string(0, col as u16, *h).expect("write header cell");
+        sheet
+            .write_string(0, col as u16, *h)
+            .expect("write header cell");
     }
     for (i, (es, data, mov, prod, qty, preco, valor)) in rows.iter().enumerate() {
         let row = (i + 1) as u32;

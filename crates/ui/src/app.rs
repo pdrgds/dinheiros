@@ -37,7 +37,13 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [Tab::Overview, Tab::Positions, Tab::Income, Tab::History, Tab::Insights];
+    pub const ALL: [Tab; 5] = [
+        Tab::Overview,
+        Tab::Positions,
+        Tab::Income,
+        Tab::History,
+        Tab::Insights,
+    ];
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -91,9 +97,7 @@ pub struct AppRoot {
     /// on first render so resize/scroll state survives across renders. Wrapped in an
     /// `Entity` as required by `gpui_component::table::TableState`.
     pub positions_table: Option<
-        gpui::Entity<
-            gpui_component::table::TableState<views::positions::PositionsTableDelegate>,
-        >,
+        gpui::Entity<gpui_component::table::TableState<views::positions::PositionsTableDelegate>>,
     >,
 }
 
@@ -313,9 +317,10 @@ impl AppRoot {
         };
 
         let total = quantity * unit_price;
-        let import_hash = dinheiros_core::hash_string(
-            &format!("manual:gold:{}:{}:{}", date, quantity, unit_price),
-        );
+        let import_hash = dinheiros_core::hash_string(&format!(
+            "manual:gold:{}:{}:{}",
+            date, quantity, unit_price
+        ));
 
         let tx = dinheiros_core::Transaction {
             id: None,
@@ -338,8 +343,10 @@ impl AppRoot {
 
         match dinheiros_core::db::queries::insert_transaction(&self.db, &tx) {
             Ok(true) => {
-                self.status_message =
-                    Some(format!("Gold added: {:.4}g at R$ {:.2}/g = R$ {:.2}", quantity, unit_price, total));
+                self.status_message = Some(format!(
+                    "Gold added: {:.4}g at R$ {:.2}/g = R$ {:.2}",
+                    quantity, unit_price, total
+                ));
                 // Reset qty and price fields, keep date
                 self.gold_fields[1].clear();
                 self.gold_fields[2].clear();
@@ -371,84 +378,106 @@ impl AppRoot {
 
         let db_path: PathBuf = dinheiros_core::db::default_db_path();
 
-        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            let paths_result = rx.await;
-            let paths = match paths_result {
-                Ok(Ok(Some(paths))) => paths,
-                _ => return, // cancelled or error
-            };
+        cx.spawn(
+            async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+                let paths_result = rx.await;
+                let paths = match paths_result {
+                    Ok(Ok(Some(paths))) => paths,
+                    _ => return, // cancelled or error
+                };
 
-            let db = match Database::open(&db_path) {
-                Ok(db) => db,
-                Err(e) => {
-                    let _ = this.update(cx, |this, cx: &mut Context<Self>| {
-                        this.status_message = Some(format!("DB error: {e}"));
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
+                let db = match Database::open(&db_path) {
+                    Ok(db) => db,
+                    Err(e) => {
+                        let _ = this.update(cx, |this, cx: &mut Context<Self>| {
+                            this.status_message = Some(format!("DB error: {e}"));
+                            cx.notify();
+                        });
+                        return;
+                    }
+                };
 
-            let mut total_msg = Vec::new();
+                let mut total_msg = Vec::new();
 
-            for path in &paths {
-                let msg = match source {
-                    "b3" => {
-                        match dinheiros_core::parsers::b3::parse_b3_xlsx(path) {
+                for path in &paths {
+                    let msg = match source {
+                        "b3" => match dinheiros_core::parsers::b3::parse_b3_xlsx(path) {
                             Ok(result) => {
                                 let mut tx_new = 0u32;
                                 let mut inc_new = 0u32;
                                 for tx in &result.transactions {
-                                    if let Ok(true) = dinheiros_core::db::queries::insert_transaction(&db, tx) {
+                                    if let Ok(true) =
+                                        dinheiros_core::db::queries::insert_transaction(&db, tx)
+                                    {
                                         tx_new += 1;
                                     }
                                 }
                                 for inc in &result.income {
-                                    if let Ok(true) = dinheiros_core::db::queries::insert_income(&db, inc) {
+                                    if let Ok(true) =
+                                        dinheiros_core::db::queries::insert_income(&db, inc)
+                                    {
                                         inc_new += 1;
                                     }
                                 }
-                                format!("{}: {} tx ({} new), {} income ({} new)",
+                                format!(
+                                    "{}: {} tx ({} new), {} income ({} new)",
                                     path.file_name().unwrap_or_default().to_string_lossy(),
-                                    result.transactions.len(), tx_new,
-                                    result.income.len(), inc_new)
+                                    result.transactions.len(),
+                                    tx_new,
+                                    result.income.len(),
+                                    inc_new
+                                )
                             }
-                            Err(e) => format!("{}: error: {e}", path.file_name().unwrap_or_default().to_string_lossy()),
-                        }
-                    }
-                    "binance" => {
-                        match dinheiros_core::parsers::binance::parse_binance_csv(path) {
-                            Ok(result) => {
-                                let mut tx_new = 0u32;
-                                for tx in &result.transactions {
-                                    if let Ok(true) = dinheiros_core::db::queries::insert_transaction(&db, tx) {
-                                        tx_new += 1;
+                            Err(e) => format!(
+                                "{}: error: {e}",
+                                path.file_name().unwrap_or_default().to_string_lossy()
+                            ),
+                        },
+                        "binance" => {
+                            match dinheiros_core::parsers::binance::parse_binance_csv(path) {
+                                Ok(result) => {
+                                    let mut tx_new = 0u32;
+                                    for tx in &result.transactions {
+                                        if let Ok(true) =
+                                            dinheiros_core::db::queries::insert_transaction(&db, tx)
+                                        {
+                                            tx_new += 1;
+                                        }
                                     }
+                                    format!(
+                                        "{}: {} tx ({} new), net BTC: {:.8}",
+                                        path.file_name().unwrap_or_default().to_string_lossy(),
+                                        result.transactions.len(),
+                                        tx_new,
+                                        result.net_btc
+                                    )
                                 }
-                                format!("{}: {} tx ({} new), net BTC: {:.8}",
-                                    path.file_name().unwrap_or_default().to_string_lossy(),
-                                    result.transactions.len(), tx_new, result.net_btc)
+                                Err(e) => format!(
+                                    "{}: error: {e}",
+                                    path.file_name().unwrap_or_default().to_string_lossy()
+                                ),
                             }
-                            Err(e) => format!("{}: error: {e}", path.file_name().unwrap_or_default().to_string_lossy()),
                         }
-                    }
-                    "ibkr-csv" => {
-                        match import_ibkr_csv(&db, path) {
+                        "ibkr-csv" => match import_ibkr_csv(&db, path) {
                             Ok(msg) => msg,
-                            Err(e) => format!("{}: error: {e}", path.file_name().unwrap_or_default().to_string_lossy()),
-                        }
-                    }
-                    _ => "Unknown source".to_string(),
-                };
-                total_msg.push(msg);
-            }
+                            Err(e) => format!(
+                                "{}: error: {e}",
+                                path.file_name().unwrap_or_default().to_string_lossy()
+                            ),
+                        },
+                        _ => "Unknown source".to_string(),
+                    };
+                    total_msg.push(msg);
+                }
 
-            let _ = this.update(cx, |this, cx: &mut Context<Self>| {
-                this.status_message = Some(total_msg.join(". "));
-                this.mode = AppMode::Tab(this.last_tab);
-                cx.notify();
-            });
-        }).detach();
+                let _ = this.update(cx, |this, cx: &mut Context<Self>| {
+                    this.status_message = Some(total_msg.join(". "));
+                    this.mode = AppMode::Tab(this.last_tab);
+                    cx.notify();
+                });
+            },
+        )
+        .detach();
     }
 
     fn start_backfill_worker(
@@ -558,22 +587,27 @@ impl AppRoot {
 
         // Poll backfill status to update UI periodically
         let status_reader = status;
-        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            loop {
-                cx.background_executor().timer(std::time::Duration::from_secs(5)).await;
-                let still_running = {
-                    let s = status_reader.lock().unwrap();
-                    s.running
-                };
-                // Trigger UI refresh so history tab picks up new data
-                let _ = this.update(cx, |_this, cx: &mut Context<Self>| {
-                    cx.notify();
-                });
-                if !still_running {
-                    break;
+        cx.spawn(
+            async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(5))
+                        .await;
+                    let still_running = {
+                        let s = status_reader.lock().unwrap();
+                        s.running
+                    };
+                    // Trigger UI refresh so history tab picks up new data
+                    let _ = this.update(cx, |_this, cx: &mut Context<Self>| {
+                        cx.notify();
+                    });
+                    if !still_running {
+                        break;
+                    }
                 }
-            }
-        }).detach();
+            },
+        )
+        .detach();
     }
 
     fn do_full_resync(&mut self, cx: &mut Context<Self>) {
@@ -617,8 +651,8 @@ impl AppRoot {
         });
 
         // Poll for the result from GPUI's async executor
-        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            loop {
+        cx.spawn(
+            async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| loop {
                 if let Some(msg) = result_slot.lock().unwrap().take() {
                     let _ = this.update(cx, |this, cx: &mut Context<Self>| {
                         this.syncing = false;
@@ -627,9 +661,12 @@ impl AppRoot {
                     });
                     break;
                 }
-                cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
-            }
-        }).detach();
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(200))
+                    .await;
+            },
+        )
+        .detach();
     }
 
     fn do_export(&mut self, cx: &mut Context<Self>) {
@@ -642,26 +679,28 @@ impl AppRoot {
         );
         let rx = cx.prompt_for_new_path(&default_dir, Some(&suggested_name));
 
-        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-            let path = match rx.await {
-                Ok(Ok(Some(p))) => p,
-                _ => return,
-            };
+        cx.spawn(
+            async move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
+                let path = match rx.await {
+                    Ok(Ok(Some(p))) => p,
+                    _ => return,
+                };
 
-            let _ = this.update(cx, |this, cx: &mut Context<Self>| {
-                match export::export_to_json(&this.db, &path) {
-                    Ok(()) => {
-                        this.status_message = Some(format!("Exported to {}", path.display()));
-                        println!("[export] success: {}", path.display());
+                let _ = this.update(cx, |this, cx: &mut Context<Self>| {
+                    match export::export_to_json(&this.db, &path) {
+                        Ok(()) => {
+                            this.status_message = Some(format!("Exported to {}", path.display()));
+                            println!("[export] success: {}", path.display());
+                        }
+                        Err(e) => {
+                            this.status_message = Some(format!("Export failed: {}", e));
+                            eprintln!("[export] error: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        this.status_message = Some(format!("Export failed: {}", e));
-                        eprintln!("[export] error: {}", e);
-                    }
-                }
-                cx.notify();
-            });
-        })
+                    cx.notify();
+                });
+            },
+        )
         .detach();
     }
 }
@@ -710,11 +749,7 @@ impl Render for AppRoot {
 
 impl AppRoot {
     // ----- top navigation bar -----
-    fn render_navbar(
-        &self,
-        active_tab: Option<Tab>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_navbar(&self, active_tab: Option<Tab>, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_row()
@@ -730,11 +765,7 @@ impl AppRoot {
             .child(self.render_actions(cx))
     }
 
-    fn render_tabs(
-        &self,
-        active_tab: Option<Tab>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_tabs(&self, active_tab: Option<Tab>, cx: &mut Context<Self>) -> impl IntoElement {
         let mut row = div().flex().flex_row().gap_1();
         for tab in Tab::ALL {
             let is_active = active_tab == Some(tab);
@@ -781,35 +812,39 @@ impl AppRoot {
             .child(tab.label())
     }
 
-    fn render_actions(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_actions(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_row()
             .gap_2()
             .child(
-                action_button("import-btn", "Import", theme::ACCENT)
-                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                action_button("import-btn", "Import", theme::ACCENT).on_click(cx.listener(
+                    |this, _ev: &ClickEvent, _window, cx| {
                         this.set_mode(AppMode::Import, cx);
-                    })),
+                    },
+                )),
             )
             .child(
-                action_button("gold-btn", "+ Gold", theme::YELLOW)
-                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                action_button("gold-btn", "+ Gold", theme::YELLOW).on_click(cx.listener(
+                    |this, _ev: &ClickEvent, _window, cx| {
                         this.set_mode(AppMode::ManualGold, cx);
-                    })),
+                    },
+                )),
             )
             .child(
-                action_button("export-btn", "Export", theme::GREEN)
-                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                action_button("export-btn", "Export", theme::GREEN).on_click(cx.listener(
+                    |this, _ev: &ClickEvent, _window, cx| {
                         this.do_export(cx);
-                    })),
+                    },
+                )),
             )
             .child({
                 let sync_label = if self.syncing { "Syncing..." } else { "Sync" };
-                let sync_color = if self.syncing { theme::TEXT_SECONDARY } else { rgb(0x06b6d4) };
+                let sync_color = if self.syncing {
+                    theme::TEXT_SECONDARY
+                } else {
+                    rgb(0x06b6d4)
+                };
                 let menu_open = self.sync_menu_open;
 
                 div()
@@ -876,20 +911,23 @@ impl AppRoot {
                                         .cursor_pointer()
                                         .hover(|s| s.bg(theme::BORDER))
                                         .rounded_md()
-                                        .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
-                                            this.sync_menu_open = false;
-                                            this.do_full_resync(cx);
-                                        }))
+                                        .on_click(cx.listener(
+                                            |this, _ev: &ClickEvent, _window, cx| {
+                                                this.sync_menu_open = false;
+                                                this.do_full_resync(cx);
+                                            },
+                                        ))
                                         .child("Full Resync"),
                                 ),
                         )
                     })
             })
             .child(
-                action_button("settings-btn", "Settings", theme::BORDER)
-                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                action_button("settings-btn", "Settings", theme::BORDER).on_click(cx.listener(
+                    |this, _ev: &ClickEvent, _window, cx| {
                         this.set_mode(AppMode::Settings, cx);
-                    })),
+                    },
+                )),
             )
     }
 
@@ -899,7 +937,9 @@ impl AppRoot {
             AppMode::Tab(Tab::Overview) => views::overview::render_overview(&self.db),
             AppMode::Tab(Tab::Positions) => views::positions::render_positions(self, window, cx),
             AppMode::Tab(Tab::Income) => views::income::render_income(&self.db),
-            AppMode::Tab(Tab::History) => views::history::render_history(&self.db, self.history_range, self.history_split, cx),
+            AppMode::Tab(Tab::History) => {
+                views::history::render_history(&self.db, self.history_range, self.history_split, cx)
+            }
             AppMode::Tab(Tab::Insights) => views::insights::render_insights(&self.db),
             AppMode::Import => self.render_import_mode(cx),
             AppMode::ManualGold => self.render_gold_mode(cx),
@@ -921,27 +961,24 @@ impl AppRoot {
 
     fn render_back_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let last_tab_label = self.last_tab.label();
-        div()
-            .px_6()
-            .pb_4()
-            .child(
-                div()
-                    .id("back-btn")
-                    .px_3()
-                    .py_1()
-                    .rounded_md()
-                    .bg(theme::BG_SECONDARY)
-                    .border_1()
-                    .border_color(theme::BORDER)
-                    .text_sm()
-                    .text_color(theme::TEXT_SECONDARY)
-                    .cursor_pointer()
-                    .hover(|style| style.bg(theme::BORDER))
-                    .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
-                        this.go_back(cx);
-                    }))
-                    .child(format!("Back to {}", last_tab_label)),
-            )
+        div().px_6().pb_4().child(
+            div()
+                .id("back-btn")
+                .px_3()
+                .py_1()
+                .rounded_md()
+                .bg(theme::BG_SECONDARY)
+                .border_1()
+                .border_color(theme::BORDER)
+                .text_sm()
+                .text_color(theme::TEXT_SECONDARY)
+                .cursor_pointer()
+                .hover(|style| style.bg(theme::BORDER))
+                .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                    this.go_back(cx);
+                }))
+                .child(format!("Back to {}", last_tab_label)),
+        )
     }
 
     // ----- Import mode -----
@@ -971,10 +1008,11 @@ impl AppRoot {
                     .flex_row()
                     .gap_4()
                     .child(
-                        action_button("do-import-b3", "Import B3 (.xlsx)", theme::GREEN)
-                            .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                        action_button("do-import-b3", "Import B3 (.xlsx)", theme::GREEN).on_click(
+                            cx.listener(|this, _ev: &ClickEvent, _window, cx| {
                                 this.do_import("b3", cx);
-                            })),
+                            }),
+                        ),
                     )
                     .child(
                         action_button("do-import-binance", "Import Binance (.csv)", theme::YELLOW)
@@ -983,10 +1021,11 @@ impl AppRoot {
                             })),
                     )
                     .child(
-                        action_button("do-import-ibkr", "Import IBKR CSV", theme::ACCENT)
-                            .on_click(cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                        action_button("do-import-ibkr", "Import IBKR CSV", theme::ACCENT).on_click(
+                            cx.listener(|this, _ev: &ClickEvent, _window, cx| {
                                 this.do_import("ibkr-csv", cx);
-                            })),
+                            }),
+                        ),
                     ),
             );
 
@@ -1178,7 +1217,11 @@ impl AppRoot {
 
     // ----- Gold entry mode -----
     fn render_gold_mode(&self, cx: &mut Context<Self>) -> AnyElement {
-        let labels = ["Date (YYYY-MM-DD)", "Quantity (grams)", "Unit Price (BRL/g)"];
+        let labels = [
+            "Date (YYYY-MM-DD)",
+            "Quantity (grams)",
+            "Unit Price (BRL/g)",
+        ];
 
         let mut content = div()
             .id("gold-panel")
@@ -1270,8 +1313,16 @@ impl AppRoot {
             value.to_string()
         };
 
-        let border_col = if is_active { theme::YELLOW } else { theme::BORDER };
-        let field_bg = if is_active { rgb(0x0d0d1a) } else { theme::BG_PRIMARY };
+        let border_col = if is_active {
+            theme::YELLOW
+        } else {
+            theme::BORDER
+        };
+        let field_bg = if is_active {
+            rgb(0x0d0d1a)
+        } else {
+            theme::BG_PRIMARY
+        };
         let text_col = if value.is_empty() && !is_active {
             theme::TEXT_SECONDARY
         } else {
@@ -1419,7 +1470,13 @@ fn import_ibkr_csv(
         };
 
         trades.push(ParsedTrade {
-            symbol, currency, date, quantity, trade_price, proceeds, commission,
+            symbol,
+            currency,
+            date,
+            quantity,
+            trade_price,
+            proceeds,
+            commission,
         });
     }
 
@@ -1442,8 +1499,7 @@ fn import_ibkr_csv(
             Err(_) => continue,
         };
 
-        let (symbol, _) =
-            dinheiros_core::parsers::ibkr::parse_dividend_description(description);
+        let (symbol, _) = dinheiros_core::parsers::ibkr::parse_dividend_description(description);
         if symbol.is_empty() {
             continue;
         }
@@ -1471,7 +1527,12 @@ fn import_ibkr_csv(
         }
 
         dividends.push(ParsedDividend {
-            symbol, currency, date, gross_amount: amount, tax_amount, tax_origin,
+            symbol,
+            currency,
+            date,
+            gross_amount: amount,
+            tax_amount,
+            tax_origin,
         });
     }
 
@@ -1609,8 +1670,14 @@ fn import_ibkr_csv(
         };
 
         let tx = dinheiros_core::parsers::ibkr::trade_to_transaction(
-            &t.symbol, &t.currency, t.date, t.quantity, t.trade_price,
-            t.proceeds, t.commission, brl_rate,
+            &t.symbol,
+            &t.currency,
+            t.date,
+            t.quantity,
+            t.trade_price,
+            t.proceeds,
+            t.commission,
+            brl_rate,
         );
         match dinheiros_core::db::queries::insert_transaction(db, &tx) {
             Ok(true) => tx_new += 1,
@@ -1633,8 +1700,13 @@ fn import_ibkr_csv(
         };
 
         let inc = dinheiros_core::parsers::ibkr::dividend_to_income(
-            &d.symbol, &d.currency, d.date, d.gross_amount,
-            d.tax_amount, &d.tax_origin, brl_rate,
+            &d.symbol,
+            &d.currency,
+            d.date,
+            d.gross_amount,
+            d.tax_amount,
+            &d.tax_origin,
+            brl_rate,
         );
         match dinheiros_core::db::queries::insert_income(db, &inc) {
             Ok(true) => inc_new += 1,
@@ -1682,10 +1754,7 @@ fn fetch_ptax_rates_blocking(
         // Group dates by currency
         let mut by_currency: HashMap<String, Vec<chrono::NaiveDate>> = HashMap::new();
         for (currency, date) in keys {
-            by_currency
-                .entry(currency.clone())
-                .or_default()
-                .push(*date);
+            by_currency.entry(currency.clone()).or_default().push(*date);
         }
 
         for (currency, dates) in &by_currency {
@@ -1693,7 +1762,9 @@ fn fetch_ptax_rates_blocking(
             let max_date = *dates.iter().max().unwrap();
 
             // Try range fetch first (one API call for all dates of this currency)
-            match dinheiros_core::api::bcb_ptax::fetch_rates_range(currency, min_date, max_date).await {
+            match dinheiros_core::api::bcb_ptax::fetch_rates_range(currency, min_date, max_date)
+                .await
+            {
                 Ok(range_rates) => {
                     let rate_map: HashMap<chrono::NaiveDate, f64> =
                         range_rates.into_iter().collect();
@@ -1708,7 +1779,10 @@ fn fetch_ptax_rates_blocking(
                     }
                 }
                 Err(e) => {
-                    eprintln!("[import] range PTAX fetch failed for {}: {}, trying individual", currency, e);
+                    eprintln!(
+                        "[import] range PTAX fetch failed for {}: {}, trying individual",
+                        currency, e
+                    );
                     // Fallback: fetch individually
                     for &date in dates {
                         match dinheiros_core::api::bcb_ptax::fetch_rate(currency, date).await {
@@ -1716,7 +1790,10 @@ fn fetch_ptax_rates_blocking(
                                 results.insert((currency.clone(), date), rate);
                             }
                             Err(e) => {
-                                eprintln!("[import] PTAX fetch failed for {} on {}: {}", currency, date, e);
+                                eprintln!(
+                                    "[import] PTAX fetch failed for {} on {}: {}",
+                                    currency, date, e
+                                );
                             }
                         }
                     }

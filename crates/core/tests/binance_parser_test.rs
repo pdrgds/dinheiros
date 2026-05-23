@@ -9,9 +9,21 @@ fn test_parse_binance_csv_sample_a() {
     let path = common::write_binance_sample_a(tmp.path());
     let result = parse_binance_csv(&path).expect("failed to parse Binance CSV");
 
-    let buys: Vec<_> = result.transactions.iter().filter(|t| t.tx_type == TxType::Buy).collect();
-    let sends: Vec<_> = result.transactions.iter().filter(|t| t.tx_type == TxType::Send).collect();
-    let deposits: Vec<_> = result.transactions.iter().filter(|t| t.tx_type == TxType::Deposit).collect();
+    let buys: Vec<_> = result
+        .transactions
+        .iter()
+        .filter(|t| t.tx_type == TxType::Buy)
+        .collect();
+    let sends: Vec<_> = result
+        .transactions
+        .iter()
+        .filter(|t| t.tx_type == TxType::Send)
+        .collect();
+    let deposits: Vec<_> = result
+        .transactions
+        .iter()
+        .filter(|t| t.tx_type == TxType::Deposit)
+        .collect();
 
     assert_eq!(buys.len(), 7);
     assert_eq!(sends.len(), 2);
@@ -43,8 +55,16 @@ fn test_parse_binance_csv_sample_b() {
     let path = common::write_binance_sample_b(tmp.path());
     let result = parse_binance_csv(&path).expect("failed to parse Binance CSV");
 
-    let buys: Vec<_> = result.transactions.iter().filter(|t| t.tx_type == TxType::Buy).collect();
-    let sends: Vec<_> = result.transactions.iter().filter(|t| t.tx_type == TxType::Send).collect();
+    let buys: Vec<_> = result
+        .transactions
+        .iter()
+        .filter(|t| t.tx_type == TxType::Buy)
+        .collect();
+    let sends: Vec<_> = result
+        .transactions
+        .iter()
+        .filter(|t| t.tx_type == TxType::Send)
+        .collect();
 
     assert_eq!(buys.len(), 4);
     assert_eq!(sends.len(), 4);

@@ -23,9 +23,27 @@ pub fn render_insights(db: &Database) -> AnyElement {
                 .font_weight(FontWeight::BOLD)
                 .child("Insights"),
         )
-        .child(render_category_insights_n(db, "Stocks (Top 5)", theme::ACCENT, |at| at == "stock_intl" || at == "stock_br", Some(5)))
-        .child(render_category_insights_n(db, "Tesouro Direto", theme::YELLOW, |at| at == "tesouro", None))
-        .child(render_category_insights_n(db, "Crypto", theme::RED, |at| at == "crypto", None))
+        .child(render_category_insights_n(
+            db,
+            "Stocks (Top 5)",
+            theme::ACCENT,
+            |at| at == "stock_intl" || at == "stock_br",
+            Some(5),
+        ))
+        .child(render_category_insights_n(
+            db,
+            "Tesouro Direto",
+            theme::YELLOW,
+            |at| at == "tesouro",
+            None,
+        ))
+        .child(render_category_insights_n(
+            db,
+            "Crypto",
+            theme::RED,
+            |at| at == "crypto",
+            None,
+        ))
         .child(render_portfolio_summary(db))
         .into_any_element()
 }
@@ -93,7 +111,11 @@ fn compute_category_pnl(db: &Database, filter: impl Fn(&str) -> bool) -> Vec<Sym
             .map(|p| p.close_price * p.brl_rate)
             .unwrap_or(0.0);
 
-        let current_value = if qty > 0.0001 { qty * current_price } else { 0.0 };
+        let current_value = if qty > 0.0001 {
+            qty * current_price
+        } else {
+            0.0
+        };
         let unrealized_pnl = current_value - cost_basis;
         let realized_pnl = total_sold - (total_bought - cost_basis);
         let total_pnl = realized_pnl + unrealized_pnl;
@@ -113,7 +135,11 @@ fn compute_category_pnl(db: &Database, filter: impl Fn(&str) -> bool) -> Vec<Sym
         });
     }
 
-    results.sort_by(|a, b| b.total_pnl.partial_cmp(&a.total_pnl).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.total_pnl
+            .partial_cmp(&a.total_pnl)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results
 }
 
@@ -136,9 +162,17 @@ fn render_category_insights_n(
     let total_realized: f64 = items.iter().map(|i| i.realized_pnl).sum();
     let total_unrealized: f64 = items.iter().map(|i| i.unrealized_pnl).sum();
     let total_pnl: f64 = items.iter().map(|i| i.total_pnl).sum();
-    let total_pnl_pct = if total_bought > 0.0 { total_pnl / total_bought * 100.0 } else { 0.0 };
+    let total_pnl_pct = if total_bought > 0.0 {
+        total_pnl / total_bought * 100.0
+    } else {
+        0.0
+    };
 
-    let pnl_color = if total_pnl >= 0.0 { theme::GREEN } else { theme::RED };
+    let pnl_color = if total_pnl >= 0.0 {
+        theme::GREEN
+    } else {
+        theme::RED
+    };
 
     let mut panel = div()
         .flex()
@@ -168,7 +202,11 @@ fn render_category_insights_n(
                     .text_lg()
                     .font_weight(FontWeight::BOLD)
                     .text_color(pnl_color)
-                    .child(format!("R$ {:+} ({:+.1}%)", format_brl(total_pnl), total_pnl_pct)),
+                    .child(format!(
+                        "R$ {:+} ({:+.1}%)",
+                        format_brl(total_pnl),
+                        total_pnl_pct
+                    )),
             ),
     );
 
@@ -178,11 +216,28 @@ fn render_category_insights_n(
             .flex_row()
             .gap_6()
             .text_xs()
-            .child(stat("Total Invested", &format!("R$ {}", format_brl(total_bought))))
-            .child(stat("Total Sold", &format!("R$ {}", format_brl(total_sold))))
-            .child(stat("Current Value", &format!("R$ {}", format_brl(total_current))))
-            .child(stat_colored("Realized P/L", &format!("R$ {:+}", format_brl(total_realized)), total_realized))
-            .child(stat_colored("Unrealized P/L", &format!("R$ {:+}", format_brl(total_unrealized)), total_unrealized)),
+            .child(stat(
+                "Total Invested",
+                &format!("R$ {}", format_brl(total_bought)),
+            ))
+            .child(stat(
+                "Total Sold",
+                &format!("R$ {}", format_brl(total_sold)),
+            ))
+            .child(stat(
+                "Current Value",
+                &format!("R$ {}", format_brl(total_current)),
+            ))
+            .child(stat_colored(
+                "Realized P/L",
+                &format!("R$ {:+}", format_brl(total_realized)),
+                total_realized,
+            ))
+            .child(stat_colored(
+                "Unrealized P/L",
+                &format!("R$ {:+}", format_brl(total_unrealized)),
+                total_unrealized,
+            )),
     );
 
     // Per-instrument table
@@ -214,8 +269,16 @@ fn render_category_insights_n(
     let hidden_count = items.len() - display_items.len();
 
     for item in display_items {
-        let pnl_col = if item.total_pnl >= 0.0 { theme::GREEN } else { theme::RED };
-        let status_col = if item.status == "Holding" { theme::GREEN } else { theme::TEXT_SECONDARY };
+        let pnl_col = if item.total_pnl >= 0.0 {
+            theme::GREEN
+        } else {
+            theme::RED
+        };
+        let status_col = if item.status == "Holding" {
+            theme::GREEN
+        } else {
+            theme::TEXT_SECONDARY
+        };
 
         panel = panel.child(
             div()
@@ -225,24 +288,41 @@ fn render_category_insights_n(
                 .border_b_1()
                 .border_color(theme::BORDER)
                 .text_xs()
-                .child(div().w(px(130.0)).font_weight(FontWeight::MEDIUM).child(item.symbol.clone()))
-                .child(div().w(px(55.0)).text_color(status_col).child(item.status))
-                .child(div().w(px(90.0)).child(format!("R$ {}", format_brl(item.total_bought))))
-                .child(div().w(px(90.0)).child(
-                    if item.current_qty > 0.0001 {
-                        format!("R$ {}", format_brl(item.current_value))
-                    } else {
-                        "—".to_string()
-                    },
-                ))
                 .child(
-                    div().w(px(90.0))
-                        .text_color(if item.realized_pnl >= 0.0 { theme::GREEN } else { theme::RED })
+                    div()
+                        .w(px(130.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(item.symbol.clone()),
+                )
+                .child(div().w(px(55.0)).text_color(status_col).child(item.status))
+                .child(
+                    div()
+                        .w(px(90.0))
+                        .child(format!("R$ {}", format_brl(item.total_bought))),
+                )
+                .child(div().w(px(90.0)).child(if item.current_qty > 0.0001 {
+                    format!("R$ {}", format_brl(item.current_value))
+                } else {
+                    "—".to_string()
+                }))
+                .child(
+                    div()
+                        .w(px(90.0))
+                        .text_color(if item.realized_pnl >= 0.0 {
+                            theme::GREEN
+                        } else {
+                            theme::RED
+                        })
                         .child(format!("{:+}", format_brl(item.realized_pnl))),
                 )
                 .child(
-                    div().w(px(90.0))
-                        .text_color(if item.unrealized_pnl >= 0.0 { theme::GREEN } else { theme::RED })
+                    div()
+                        .w(px(90.0))
+                        .text_color(if item.unrealized_pnl >= 0.0 {
+                            theme::GREEN
+                        } else {
+                            theme::RED
+                        })
                         .child(if item.current_qty > 0.0001 {
                             format!("{:+}", format_brl(item.unrealized_pnl))
                         } else {
@@ -250,7 +330,8 @@ fn render_category_insights_n(
                         }),
                 )
                 .child(
-                    div().w(px(100.0))
+                    div()
+                        .w(px(100.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(pnl_col)
                         .child(format!("R$ {:+}", format_brl(item.total_pnl))),
@@ -302,8 +383,16 @@ fn render_portfolio_summary(db: &Database) -> Div {
     let realized_pnl = total_withdrawn - (total_invested - cost_basis);
     let unrealized_pnl = current_value - cost_basis;
     let total_pnl = realized_pnl + unrealized_pnl;
-    let pnl_pct = if total_invested > 0.0 { total_pnl / total_invested * 100.0 } else { 0.0 };
-    let pnl_color = if total_pnl >= 0.0 { theme::GREEN } else { theme::RED };
+    let pnl_pct = if total_invested > 0.0 {
+        total_pnl / total_invested * 100.0
+    } else {
+        0.0
+    };
+    let pnl_color = if total_pnl >= 0.0 {
+        theme::GREEN
+    } else {
+        theme::RED
+    };
 
     div()
         .flex()
@@ -327,11 +416,28 @@ fn render_portfolio_summary(db: &Database) -> Div {
                 .flex_row()
                 .gap_6()
                 .text_xs()
-                .child(stat("Total Invested", &format!("R$ {}", format_brl(total_invested))))
-                .child(stat("Total Withdrawn", &format!("R$ {}", format_brl(total_withdrawn))))
-                .child(stat("Current Value", &format!("R$ {}", format_brl(current_value))))
-                .child(stat_colored("Realized P/L", &format!("R$ {:+}", format_brl(realized_pnl)), realized_pnl))
-                .child(stat_colored("Unrealized P/L", &format!("R$ {:+}", format_brl(unrealized_pnl)), unrealized_pnl))
+                .child(stat(
+                    "Total Invested",
+                    &format!("R$ {}", format_brl(total_invested)),
+                ))
+                .child(stat(
+                    "Total Withdrawn",
+                    &format!("R$ {}", format_brl(total_withdrawn)),
+                ))
+                .child(stat(
+                    "Current Value",
+                    &format!("R$ {}", format_brl(current_value)),
+                ))
+                .child(stat_colored(
+                    "Realized P/L",
+                    &format!("R$ {:+}", format_brl(realized_pnl)),
+                    realized_pnl,
+                ))
+                .child(stat_colored(
+                    "Unrealized P/L",
+                    &format!("R$ {:+}", format_brl(unrealized_pnl)),
+                    unrealized_pnl,
+                ))
                 .child(stat_colored(
                     "Total P/L",
                     &format!("R$ {:+} ({:+.1}%)", format_brl(total_pnl), pnl_pct),
