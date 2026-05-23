@@ -1,3 +1,12 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Pedro Guedes <pdrgds@outlook.com>"]
+repository = "https://github.com/pdrgds/dinheiros"
+homepage = "https://github.com/pdrgds/dinheiros"
+readme = "README.md"
