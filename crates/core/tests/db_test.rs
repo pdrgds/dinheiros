@@ -213,7 +213,7 @@ fn test_get_distinct_symbols() {
         source: Source::Ibkr,
         asset_type: AssetType::StockIntl,
         symbol: "AAPL".to_string(),
-        tx_type: TxType::Sell,
+        tx_type: TxType::Buy,
         date: NaiveDate::from_ymd_opt(2025, 2, 1).unwrap(),
         quantity: 10.0,
         unit_price: Some(175.0),
