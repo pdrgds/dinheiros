@@ -34,3 +34,4 @@ path = "src/bin/seed_demo.rs"
 
 [dev-dependencies]
 tempfile = "3"
+rust_xlsxwriter = "0.95"
