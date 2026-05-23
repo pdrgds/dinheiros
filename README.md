@@ -2,6 +2,14 @@
 
 A personal investment portfolio tracker for Brazilian and international assets. Native desktop app written in Rust with a local-first SQLite database — no cloud, no accounts, no tracking.
 
+## Screenshots
+
+> Synthetic demo data — generate your own with `./scripts/run-demo.sh` (see [Demo mode](#demo-mode)).
+
+| Overview | Positions | History |
+|---|---|---|
+| ![Overview](docs/screenshots/overview.png) | ![Positions](docs/screenshots/positions.png) | ![History](docs/screenshots/history.png) |
+
 ## Features
 
 - **Multi-broker imports** — B3 (`.xlsx`), IBKR activity statement (`.csv`), Binance (`.csv`). Manual entry also supported.
@@ -25,6 +33,16 @@ The database lives at `~/Library/Application Support/dinheiros/data.db` on macOS
 ```bash
 cargo run --bin dinheiros
 ```
+
+### Demo mode
+
+For screenshots or trying the app without your own broker data:
+
+```bash
+./scripts/run-demo.sh
+```
+
+This seeds `/tmp/dinheiros-demo.db` with a synthetic Brazilian-investor portfolio (B3 stocks, ETFs, Tesouro, IBKR US stocks, BTC, dividends/JCP) and launches the app against it. Your real database at `~/Library/Application Support/dinheiros/data.db` is not touched. Re-running the script regenerates the demo DB from scratch.
 
 ## Build
 
