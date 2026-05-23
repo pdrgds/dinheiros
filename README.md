@@ -74,4 +74,4 @@ Core tables: `transactions`, `daily_prices`, `income`, `config`. Every transacti
 
 ## License
 
-Private. Not licensed for redistribution.
+[MIT](LICENSE) © Pedro Guedes
