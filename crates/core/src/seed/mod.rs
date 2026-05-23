@@ -59,4 +59,18 @@ mod tests {
         assert_eq!(summary.income, data::all_income().len());
         assert_eq!(summary.daily_prices, data::latest_prices().len());
     }
+
+    #[test]
+    fn seeded_db_yields_non_empty_positions() {
+        use crate::portfolio::positions::compute_positions;
+
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        seed_demo(&db).expect("seed succeeds");
+        let positions = compute_positions(&db).expect("compute positions");
+        assert!(!positions.is_empty(), "expected at least one open position");
+        // Every position should have a current_value_brl since we seeded today's prices.
+        for p in &positions {
+            assert!(p.current_value_brl.is_some(), "no price for {}", p.symbol);
+        }
+    }
 }
