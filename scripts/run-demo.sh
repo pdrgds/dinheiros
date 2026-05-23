@@ -7,6 +7,8 @@
 
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
 DB="${DINHEIROS_DEMO_DB:-/tmp/dinheiros-demo.db}"
 
 cargo run --quiet -p dinheiros-core --bin dinheiros-seed -- "$DB"
