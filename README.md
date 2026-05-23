@@ -2,6 +2,14 @@
 
 A personal investment portfolio tracker for Brazilian and international assets. Native desktop app written in Rust with a local-first SQLite database — no cloud, no accounts, no tracking.
 
+## Screenshots
+
+> Synthetic demo data — generate your own with `./scripts/run-demo.sh` (see [Demo mode](#demo-mode)).
+
+| Overview | Positions | History |
+|---|---|---|
+| ![Overview](docs/screenshots/overview.png) | ![Positions](docs/screenshots/positions.png) | ![History](docs/screenshots/history.png) |
+
 ## Features
 
 - **Multi-broker imports** — B3 (`.xlsx`), IBKR activity statement (`.csv`), Binance (`.csv`). Manual entry also supported.
